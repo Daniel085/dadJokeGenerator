@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dad Joke Generator - Design Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #8B4513 0%, #654321 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Wood grain texture overlay */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                repeating-linear-gradient(
+                    90deg,
+                    rgba(139, 69, 19, 0.1) 0px,
+                    rgba(101, 67, 33, 0.1) 2px,
+                    transparent 2px,
+                    transparent 4px
+                );
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        .workshop-container {
+            background: rgba(44, 44, 44, 0.9);
+            border: 8px solid #FFD700;
+            border-radius: 15px;
+            padding: 40px;
+            max-width: 700px;
+            width: 100%;
+            box-shadow:
+                0 20px 60px rgba(0, 0, 0, 0.5),
+                inset 0 2px 4px rgba(255, 215, 0, 0.3);
+            position: relative;
+        }
+
+        /* Tool hooks decoration */
+        .workshop-container::before {
+            content: '🔧 🔨 🪛 ⚙️';
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            letter-spacing: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            text-align: center;
+            color: #FFD700;
+            font-size: 2.5em;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.7);
+            margin-bottom: 10px;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #FFA500;
+            font-size: 1.1em;
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+
+        /* Chalkboard-style joke display */
+        .joke-display {
+            background: #2F4F2F;
+            border: 6px solid #8B7355;
+            border-radius: 10px;
+            padding: 30px;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 30px;
+            box-shadow:
+                inset 0 2px 10px rgba(0, 0, 0, 0.5),
+                0 4px 8px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+
+        /* Chalk dust effect */
+        .joke-display::after {
+            content: '';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .joke-text {
+            color: #F5F5DC;
+            font-size: 1.4em;
+            text-align: center;
+            line-height: 1.6;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+        }
+
+        /* Toolbox-style button */
+        .joke-button {
+            display: block;
+            width: 100%;
+            padding: 20px;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2C2C2C;
+            background: linear-gradient(145deg, #FFD700 0%, #FFA500 100%);
+            border: 4px solid #8B4513;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow:
+                0 6px 0 #8B4513,
+                0 8px 20px rgba(0, 0, 0, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-family: 'Impact', 'Arial Black', sans-serif;
+        }
+
+        .joke-button:hover {
+            background: linear-gradient(145deg, #FFA500 0%, #FFD700 100%);
+            transform: translateY(2px);
+            box-shadow:
+                0 4px 0 #8B4513,
+                0 6px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .joke-button:active {
+            transform: translateY(4px);
+            box-shadow:
+                0 2px 0 #8B4513,
+                0 4px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Tool belt footer */
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #FFD700;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        /* Loading animation */
+        .loading {
+            display: none;
+            color: #FFD700;
+            font-size: 1.2em;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 2em;
+            }
+            .joke-text {
+                font-size: 1.2em;
+            }
+            .joke-button {
+                font-size: 1.2em;
+                padding: 15px;
+            }
+        }
+
+        /* Decorative screws */
+        .screw {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: radial-gradient(circle, #C0C0C0 40%, #808080 100%);
+            border-radius: 50%;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .screw::before {
+            content: '×';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+            color: #606060;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .screw-tl { top: 15px; left: 15px; }
+        .screw-tr { top: 15px; right: 15px; }
+        .screw-bl { bottom: 15px; left: 15px; }
+        .screw-br { bottom: 15px; right: 15px; }
+    </style>
+</head>
+<body>
+    <div class="workshop-container">
+        <div class="screw screw-tl"></div>
+        <div class="screw screw-tr"></div>
+        <div class="screw screw-bl"></div>
+        <div class="screw screw-br"></div>
+
+        <h1>🔧 DAD'S WORKSHOP 🔨</h1>
+        <div class="subtitle">Premium Joke Craftsmanship Since Forever</div>
+
+        <div class="joke-display">
+            <div class="joke-text" id="jokeText">
+                Click the button below to get a fresh dad joke!<br><br>
+                <span style="font-size: 0.7em; color: #FFD700;">⚠️ Warning: May cause eye-rolling</span>
+            </div>
+            <div class="loading" id="loading">🔧 Crafting joke... 🔨</div>
+        </div>
+
+        <button class="joke-button" onclick="showSampleJoke()">
+            🛠️ BUILD A JOKE 🛠️
+        </button>
+
+        <div class="footer">
+            Built with love in Dad's garage | No dad bods were harmed in the making
+        </div>
+    </div>
+
+    <script>
+        // Sample jokes for mockup demonstration
+        const sampleJokes = [
+            "Why don't scientists trust atoms? Because they make up everything!",
+            "I used to hate facial hair, but then it grew on me.",
+            "What do you call a factory that makes okay products? A satisfactory.",
+            "I'm reading a book about anti-gravity. It's impossible to put down!",
+            "Why did the scarecrow win an award? He was outstanding in his field!",
+            "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+            "What do you call a belt made of watches? A waist of time!",
+            "I'm afraid for the calendar. Its days are numbered."
+        ];
+
+        function showSampleJoke() {
+            const jokeText = document.getElementById('jokeText');
+            const loading = document.getElementById('loading');
+
+            // Show loading
+            jokeText.style.display = 'none';
+            loading.style.display = 'block';
+
+            // Simulate API call delay
+            setTimeout(() => {
+                const randomJoke = sampleJokes[Math.floor(Math.random() * sampleJokes.length)];
+                jokeText.textContent = randomJoke;
+                loading.style.display = 'none';
+                jokeText.style.display = 'block';
+            }, 800);
+        }
+    </script>
+</body>
+</html>
