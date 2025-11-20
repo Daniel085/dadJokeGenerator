@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dad's Workshop - Premium Dad Joke Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #8B4513 0%, #654321 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Wood grain texture overlay */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                repeating-linear-gradient(
+                    90deg,
+                    rgba(139, 69, 19, 0.1) 0px,
+                    rgba(101, 67, 33, 0.1) 2px,
+                    transparent 2px,
+                    transparent 4px
+                );
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        .workshop-container {
+            background: rgba(44, 44, 44, 0.9);
+            border: 8px solid #FFD700;
+            border-radius: 15px;
+            padding: 40px;
+            max-width: 700px;
+            width: 100%;
+            box-shadow:
+                0 20px 60px rgba(0, 0, 0, 0.5),
+                inset 0 2px 4px rgba(255, 215, 0, 0.3);
+            position: relative;
+        }
+
+        /* Tool hooks decoration */
+        .workshop-container::before {
+            content: '🔧 🔨 🪛 ⚙️';
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            letter-spacing: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            text-align: center;
+            color: #FFD700;
+            font-size: 2.5em;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.7);
+            margin-bottom: 10px;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #FFA500;
+            font-size: 1.1em;
+            margin-bottom: 20px;
+            font-style: italic;
+        }
+
+        /* Source selector */
+        .source-selector {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .source-btn {
+            padding: 10px 20px;
+            background: rgba(255, 215, 0, 0.2);
+            border: 2px solid #FFD700;
+            border-radius: 8px;
+            color: #FFD700;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .source-btn:hover {
+            background: rgba(255, 215, 0, 0.3);
+            transform: scale(1.05);
+        }
+
+        .source-btn.active {
+            background: linear-gradient(145deg, #FFD700 0%, #FFA500 100%);
+            color: #2C2C2C;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .stats {
+            text-align: center;
+            color: #FFA500;
+            font-size: 0.85em;
+            margin-bottom: 15px;
+            min-height: 20px;
+        }
+
+        /* Chalkboard-style joke display */
+        .joke-display {
+            background: #2F4F2F;
+            border: 6px solid #8B7355;
+            border-radius: 10px;
+            padding: 30px;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 30px;
+            box-shadow:
+                inset 0 2px 10px rgba(0, 0, 0, 0.5),
+                0 4px 8px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+
+        /* Chalk dust effect */
+        .joke-display::after {
+            content: '';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .joke-text {
+            color: #F5F5DC;
+            font-size: 1.4em;
+            text-align: center;
+            line-height: 1.6;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+        }
+
+        /* Toolbox-style button */
+        .joke-button {
+            display: block;
+            width: 100%;
+            padding: 20px;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2C2C2C;
+            background: linear-gradient(145deg, #FFD700 0%, #FFA500 100%);
+            border: 4px solid #8B4513;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow:
+                0 6px 0 #8B4513,
+                0 8px 20px rgba(0, 0, 0, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-family: 'Impact', 'Arial Black', sans-serif;
+        }
+
+        .joke-button:hover:not(:disabled) {
+            background: linear-gradient(145deg, #FFA500 0%, #FFD700 100%);
+            transform: translateY(2px);
+            box-shadow:
+                0 4px 0 #8B4513,
+                0 6px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .joke-button:active:not(:disabled) {
+            transform: translateY(4px);
+            box-shadow:
+                0 2px 0 #8B4513,
+                0 4px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        .joke-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Tool belt footer */
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #FFD700;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .reset-btn {
+            margin-top: 15px;
+            padding: 8px 16px;
+            background: rgba(255, 69, 0, 0.3);
+            border: 2px solid #FF4500;
+            border-radius: 6px;
+            color: #FF4500;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 69, 0, 0.5);
+            transform: scale(1.05);
+        }
+
+        /* Loading animation */
+        .loading {
+            display: none;
+            color: #FFD700;
+            font-size: 1.2em;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Error message */
+        .error {
+            color: #FF6347;
+            font-size: 1em;
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 2em;
+            }
+            .joke-text {
+                font-size: 1.2em;
+            }
+            .joke-button {
+                font-size: 1.2em;
+                padding: 15px;
+            }
+            .workshop-container::before {
+                letter-spacing: 20px;
+                font-size: 20px;
+            }
+        }
+
+        /* Decorative screws */
+        .screw {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: radial-gradient(circle, #C0C0C0 40%, #808080 100%);
+            border-radius: 50%;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .screw::before {
+            content: '×';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+            color: #606060;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .screw-tl { top: 15px; left: 15px; }
+        .screw-tr { top: 15px; right: 15px; }
+        .screw-bl { bottom: 15px; left: 15px; }
+        .screw-br { bottom: 15px; right: 15px; }
+    </style>
+</head>
+<body>
+    <div class="workshop-container">
+        <div class="screw screw-tl"></div>
+        <div class="screw screw-tr"></div>
+        <div class="screw screw-bl"></div>
+        <div class="screw screw-br"></div>
+
+        <h1>🔧 DAD'S WORKSHOP 🔨</h1>
+        <div class="subtitle">Premium Joke Craftsmanship Since 2026</div>
+
+        <div class="source-selector">
+            <button class="source-btn active" data-source="api" onclick="switchSource('api')">
+                🌐 Live API
+            </button>
+            <button class="source-btn" data-source="local" onclick="switchSource('local')">
+                📦 Local Vault
+            </button>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="joke-display">
+            <div class="joke-text" id="jokeText">
+                Click the button below to get a fresh dad joke!<br><br>
+                <span style="font-size: 0.7em; color: #FFD700;">⚠️ Warning: May cause eye-rolling</span>
+            </div>
+            <div class="loading" id="loading">🔧 Crafting joke... 🔨</div>
+        </div>
+
+        <button class="joke-button" id="jokeButton" onclick="getJoke()">
+            🛠️ BUILD A JOKE 🛠️
+        </button>
+
+        <button class="reset-btn" onclick="resetSession()">
+            🔄 Reset Session (Clear History)
+        </button>
+
+        <div class="footer">
+            Built with love in Dad's garage | No dad bods were harmed in the making
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_URL = 'https://icanhazdadjoke.com/';
+        const LOCAL_JOKES_FILE = 'jokes.json';
+
+        // State management
+        let jokeSource = localStorage.getItem('jokeSource') || 'api';
+        let localJokes = [];
+        let seenJokes = new Set(JSON.parse(sessionStorage.getItem('seenJokes') || '[]'));
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Load local jokes
+            try {
+                const response = await fetch(LOCAL_JOKES_FILE);
+                const data = await response.json();
+                localJokes = data.jokes;
+                console.log(`Loaded ${localJokes.length} local jokes`);
+            } catch (error) {
+                console.error('Failed to load local jokes:', error);
+            }
+
+            // Set active source button
+            updateSourceButtons();
+            updateStats();
+        });
+
+        // Switch joke source
+        function switchSource(source) {
+            jokeSource = source;
+            localStorage.setItem('jokeSource', source);
+            updateSourceButtons();
+            updateStats();
+        }
+
+        // Update source button states
+        function updateSourceButtons() {
+            document.querySelectorAll('.source-btn').forEach(btn => {
+                if (btn.dataset.source === jokeSource) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+        }
+
+        // Update statistics display
+        function updateStats() {
+            const statsEl = document.getElementById('stats');
+            const total = jokeSource === 'api' ? '1000+' : localJokes.length;
+            const seen = seenJokes.size;
+            statsEl.textContent = `Source: ${jokeSource === 'api' ? 'Live API' : 'Local Vault'} | Seen this session: ${seen} jokes`;
+        }
+
+        // Get joke from API
+        async function getJokeFromAPI() {
+            const response = await fetch(API_URL, {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('API request failed');
+            }
+
+            const data = await response.json();
+            return {
+                id: data.id,
+                joke: data.joke
+            };
+        }
+
+        // Get joke from local storage
+        function getJokeFromLocal() {
+            if (localJokes.length === 0) {
+                throw new Error('No local jokes available');
+            }
+
+            // Filter out seen jokes
+            const unseenJokes = localJokes.filter((_, index) => !seenJokes.has(`local_${index}`));
+
+            // If all jokes have been seen, reset
+            if (unseenJokes.length === 0) {
+                // Clear only local joke history
+                const seenArray = Array.from(seenJokes);
+                seenJokes = new Set(seenArray.filter(id => !id.startsWith('local_')));
+                sessionStorage.setItem('seenJokes', JSON.stringify([...seenJokes]));
+                return getJokeFromLocal(); // Retry
+            }
+
+            // Pick random unseen joke
+            const randomIndex = Math.floor(Math.random() * localJokes.length);
+            let attempts = 0;
+            let index = randomIndex;
+
+            // Find an unseen joke
+            while (seenJokes.has(`local_${index}`) && attempts < localJokes.length) {
+                index = (index + 1) % localJokes.length;
+                attempts++;
+            }
+
+            return {
+                id: `local_${index}`,
+                joke: localJokes[index]
+            };
+        }
+
+        // Main joke fetching function
+        async function getJoke() {
+            const jokeTextEl = document.getElementById('jokeText');
+            const loadingEl = document.getElementById('loading');
+            const buttonEl = document.getElementById('jokeButton');
+
+            // Show loading state
+            jokeTextEl.style.display = 'none';
+            loadingEl.style.display = 'block';
+            buttonEl.disabled = true;
+
+            try {
+                let jokeData;
+
+                if (jokeSource === 'api') {
+                    try {
+                        jokeData = await getJokeFromAPI();
+
+                        // Check if we've seen this API joke before
+                        let attempts = 0;
+                        while (seenJokes.has(jokeData.id) && attempts < 5) {
+                            jokeData = await getJokeFromAPI();
+                            attempts++;
+                        }
+                    } catch (error) {
+                        console.warn('API failed, falling back to local jokes:', error);
+                        jokeData = getJokeFromLocal();
+                    }
+                } else {
+                    jokeData = getJokeFromLocal();
+                }
+
+                // Mark joke as seen
+                seenJokes.add(jokeData.id);
+                sessionStorage.setItem('seenJokes', JSON.stringify([...seenJokes]));
+
+                // Display joke
+                jokeTextEl.textContent = jokeData.joke;
+                updateStats();
+
+            } catch (error) {
+                console.error('Error fetching joke:', error);
+                jokeTextEl.innerHTML = `<span class="error">Oops! The workshop ran out of materials.<br>Try again or switch to ${jokeSource === 'api' ? 'Local Vault' : 'Live API'}.</span>`;
+            } finally {
+                // Hide loading state
+                loadingEl.style.display = 'none';
+                jokeTextEl.style.display = 'block';
+                buttonEl.disabled = false;
+            }
+        }
+
+        // Reset session (clear seen jokes)
+        function resetSession() {
+            if (confirm('This will clear your joke history. You may see jokes you\'ve already heard. Continue?')) {
+                seenJokes.clear();
+                sessionStorage.removeItem('seenJokes');
+                updateStats();
+
+                // Show confirmation
+                const jokeTextEl = document.getElementById('jokeText');
+                jokeTextEl.innerHTML = `<span style="color: #90EE90;">✓ Session reset! All jokes are fresh again.</span>`;
+
+                setTimeout(() => {
+                    jokeTextEl.innerHTML = `Click the button below to get a fresh dad joke!<br><br><span style="font-size: 0.7em; color: #FFD700;">⚠️ Warning: May cause eye-rolling</span>`;
+                }, 2000);
+            }
+        }
+
+        // Keyboard shortcut: Space or Enter to get new joke
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'Enter') {
+                const button = document.getElementById('jokeButton');
+                if (!button.disabled && document.activeElement.tagName !== 'BUTTON') {
+                    e.preventDefault();
+                    getJoke();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
