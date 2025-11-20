@@ -1,0 +1,26 @@
+# Dad Joke Model Training Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core ML Framework
+torch>=2.1.0
+transformers==4.36.0
+accelerate==0.25.0
+
+# Fine-tuning
+peft==0.7.1  # LoRA support
+bitsandbytes>=0.41.0  # Quantization
+
+# Data handling
+datasets==2.16.0
+tqdm>=4.65.0
+
+# Optional: Experiment tracking
+wandb  # Comment out if not using
+
+# Tokenizer
+sentencepiece>=0.1.99
+protobuf>=3.20.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
