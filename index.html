@@ -309,10 +309,10 @@
         <div class="subtitle">Premium Joke Craftsmanship Since 2026</div>
 
         <div class="source-selector">
-            <button class="source-btn active" data-source="api" onclick="switchSource('api')">
+            <button class="source-btn" data-source="api" onclick="switchSource('api')">
                 🌐 Live API
             </button>
-            <button class="source-btn" data-source="local" onclick="switchSource('local')">
+            <button class="source-btn active" data-source="local" onclick="switchSource('local')">
                 📦 Local Vault
             </button>
         </div>
@@ -336,7 +336,7 @@
         </button>
 
         <div class="footer">
-            Built with love in Dad's garage | No dad bods were harmed in the making
+            Built over coffee with love in Dad's garage | No dad bods were harmed in the making
         </div>
     </div>
 
@@ -346,7 +346,7 @@
         const LOCAL_JOKES_FILE = 'jokes.json';
 
         // State management
-        let jokeSource = localStorage.getItem('jokeSource') || 'api';
+        let jokeSource = localStorage.getItem('jokeSource') || 'local';
         let localJokes = [];
         let seenJokes = new Set(JSON.parse(sessionStorage.getItem('seenJokes') || '[]'));
 
