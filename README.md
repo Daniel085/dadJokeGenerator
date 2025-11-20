@@ -1,6 +1,6 @@
 # 🔧 Dad's Workshop - Dad Joke Generator 🔨
 
-A playful, fully-functional web-based dad joke generator with a charming garage/workshop theme. Built as a portfolio demonstration piece showcasing clean code, thoughtful UX design, and creative frontend development.
+A playful, fully-functional web-based dad joke generator with a charming garage/workshop theme. As a dad-to-be, I need to brush up on my dad jokes!
 
 **⚡ Built in under 1 hour** | [Live Demo](https://daniel085.github.io/dadJokeGenerator/) 
 
