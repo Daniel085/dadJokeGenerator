@@ -408,10 +408,16 @@ if (!navigator.gpu) {
 
 ### Mobile Strategy
 
-**Recommendation: Disable AI on mobile**
-- Reason: 2GB model too large for mobile
-- Alternative: Show message suggesting desktop
-- Fallback: Local Vault works perfectly
+**✅ IMPLEMENTED: AI Disabled on Mobile**
+- **Detection**: User agent + touch points detection
+- **UI Behavior**: AI button disabled with tooltip explanation
+- **User Feedback**: Alert shown if mobile user tries to activate AI mode
+- **Reasons for mobile exclusion**:
+  - WebGPU not available on mobile browsers
+  - 2GB model download impractical on mobile data
+  - Insufficient RAM/VRAM on most mobile devices
+  - Significant battery drain
+- **Alternative**: API and Local Vault work perfectly on mobile
 
 ---
 
