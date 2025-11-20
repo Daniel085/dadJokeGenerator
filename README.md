@@ -77,7 +77,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - 🔒 **Privacy-first** - All processing happens in your browser
 - 💰 **Free** - No API costs, completely offline after initial model download
 - ⚡ **Fast** - 2-5 seconds per joke after initialization
-- 🧠 **Smart** - Learns dad joke style from your curated examples
+- 🧠 **Smart** - Learns dad joke style from curated examples
 
 **Browser Requirements:**
 - Chrome 113+ ✅
@@ -86,7 +86,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - Firefox ❌ (WebGPU coming soon)
 
 **First-Time Setup:**
-- One-time model download (~2GB, cached permanently)
+- One-time model download (~2GB, cached)
 - 20-30 second initialization
 - Subsequent page loads: instant (model cached in IndexedDB)
 
@@ -463,14 +463,12 @@ This project is open source and available under the [MIT License](LICENSE).
 - **WebLLM Team** - For making browser-based LLM inference possible
 - **Alibaba Qwen Team** - For the excellent Qwen2.5-3B model
 - **Dad joke writers everywhere** - For the groan-worthy puns
-- **My dad** - For the inspiration 😄
 
 ---
 
 ## 👤 Author
 
 **Daniel**
-- Portfolio: [Add your portfolio link]
 - GitHub: [@Daniel085](https://github.com/Daniel085)
 - LinkedIn: [Add your LinkedIn]
 
