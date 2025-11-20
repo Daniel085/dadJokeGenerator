@@ -446,8 +446,10 @@
         <div class="ai-info" id="aiInfo">
             <h3>🤖 AI Dad Joke Generator</h3>
             <p>Generate unlimited unique dad jokes using AI!</p>
+            <p><strong>⚠️ Desktop Only - Not available on mobile devices</strong></p>
             <p><strong>First-time setup required:</strong></p>
             <ul>
+                <li>Desktop browser with WebGPU support</li>
                 <li>Download AI model (~2GB, one-time only)</li>
                 <li>Model cached in browser for future use</li>
                 <li>Requires Chrome 113+, Edge 113+, or Safari 18+</li>
@@ -520,6 +522,12 @@
         // Debug mode
         const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === 'true';
 
+        // Mobile detection
+        function isMobileDevice() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                   (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
             // Load local jokes
@@ -532,11 +540,15 @@
                 console.error('Failed to load local jokes:', error);
             }
 
-            // Check WebGPU support for AI mode
-            if (!navigator.gpu) {
-                const aiButton = document.getElementById('aiButton');
+            // Check for mobile or WebGPU support for AI mode
+            const aiButton = document.getElementById('aiButton');
+            if (isMobileDevice()) {
                 aiButton.disabled = true;
-                aiButton.title = 'Requires Chrome 113+, Edge 113+, or Safari 18+';
+                aiButton.title = 'AI mode not available on mobile devices (requires desktop browser)';
+                console.warn('Mobile device detected - AI mode disabled');
+            } else if (!navigator.gpu) {
+                aiButton.disabled = true;
+                aiButton.title = 'Requires Chrome 113+, Edge 113+, or Safari 18+ with WebGPU';
                 console.warn('WebGPU not supported - AI mode disabled');
             }
 
@@ -763,6 +775,28 @@ Family-friendly, groan-worthy, max 2 sentences. No explanations.`
 
         // Switch joke source
         function switchSource(source) {
+            // Check if trying to use AI on mobile or unsupported browser
+            if (source === 'ai') {
+                if (isMobileDevice()) {
+                    alert('🤖 AI Mode Not Available on Mobile\n\n' +
+                          'AI joke generation requires:\n' +
+                          '• Desktop browser (Chrome/Edge 113+ or Safari 18+)\n' +
+                          '• ~2GB model download\n' +
+                          '• Significant processing power\n\n' +
+                          'Please use API or Local Vault mode on mobile, or try AI mode on a desktop computer!');
+                    return; // Don't switch to AI
+                } else if (!navigator.gpu) {
+                    alert('🤖 AI Mode Not Supported\n\n' +
+                          'Your browser doesn\'t support WebGPU, which is required for AI mode.\n\n' +
+                          'Supported browsers:\n' +
+                          '• Chrome 113+\n' +
+                          '• Edge 113+\n' +
+                          '• Safari 18+ (experimental)\n\n' +
+                          'Please update your browser or use API/Local Vault mode!');
+                    return; // Don't switch to AI
+                }
+            }
+
             jokeSource = source;
             localStorage.setItem('jokeSource', source);
             updateSourceButtons();

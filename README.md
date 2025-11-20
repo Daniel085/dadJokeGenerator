@@ -59,10 +59,13 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 
 ### 🤖 AI Mode (New!)
 
+**⚠️ Desktop Only - Not available on mobile devices**
+
 **Cutting-edge on-device AI joke generation using WebLLM**
 
 - **Model**: Qwen2.5-3B-Instruct (2GB, optimized for creativity)
 - **Technology**: WebLLM + WebGPU for browser-based ML inference
+- **Platform**: Desktop browsers only (mobile devices not supported)
 - **Quality Control**: Multi-layer validation system ensures dad-joke quality
 - **Generation Process**:
   1. Few-shot prompting with 3-6 curated examples
@@ -79,11 +82,17 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - ⚡ **Fast** - 2-5 seconds per joke after initialization
 - 🧠 **Smart** - Learns dad joke style from curated examples
 
-**Browser Requirements:**
-- Chrome 113+ ✅
-- Edge 113+ ✅
-- Safari 18+ ⚠️ (experimental WebGPU support)
-- Firefox ❌ (WebGPU coming soon)
+**System Requirements:**
+- **Desktop browser** (required):
+  - Chrome 113+ ✅
+  - Edge 113+ ✅
+  - Safari 18+ ⚠️ (experimental WebGPU support)
+  - Firefox ❌ (WebGPU coming soon)
+- **Mobile devices**: ❌ Not supported
+  - WebGPU not available on mobile browsers
+  - 2GB model download impractical on mobile data
+  - Insufficient RAM/VRAM on most mobile devices
+  - Use API or Local Vault mode on mobile instead
 
 **First-Time Setup:**
 - One-time model download (~2GB, cached)
