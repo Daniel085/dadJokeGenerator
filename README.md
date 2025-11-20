@@ -404,7 +404,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - API Integration & Logic: 10 minutes
 - Testing & Polish: 5 minutes
 
-Built over coffee with Claude Code, demonstrating rapid prototyping and full-stack web development skills.
+Built over coffee with Claude Code.
 
 ---
 
