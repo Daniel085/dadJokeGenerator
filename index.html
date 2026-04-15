@@ -437,7 +437,7 @@
             <button class="source-btn active" data-source="local" onclick="switchSource('local')">
                 📦 Local Vault
             </button>
-            <button class="source-btn ai-btn" data-source="ai" onclick="switchSource('ai')" id="aiButton">
+            <button class="source-btn ai-btn" data-source="ai" onclick="switchSource('ai')">
                 🤖 AI Generated
             </button>
         </div>
@@ -445,17 +445,15 @@
         <!-- AI Info Box (shown on first use) -->
         <div class="ai-info" id="aiInfo">
             <h3>🤖 AI Dad Joke Generator</h3>
-            <p>Generate unlimited unique dad jokes using AI!</p>
-            <p><strong>⚠️ Desktop Only - Not available on mobile devices</strong></p>
-            <p><strong>First-time setup required:</strong></p>
+            <p>Generate unlimited unique dad jokes using a custom-trained AI model!</p>
+            <p><strong>First-time setup:</strong></p>
             <ul>
-                <li>Desktop browser with WebGPU support</li>
-                <li>Download AI model (~2GB, one-time only)</li>
-                <li>Model cached in browser for future use</li>
-                <li>Requires Chrome 113+, Edge 113+, or Safari 18+</li>
-                <li>Takes 20-30 seconds to initialize</li>
+                <li>Custom model trained on 4,500+ curated dad jokes</li>
+                <li>Small download (~50-80MB, cached for future use)</li>
+                <li>Works on any modern browser (desktop &amp; mobile)</li>
+                <li>Takes a few seconds to initialize</li>
             </ul>
-            <p>After setup, generates jokes in 2-5 seconds each!</p>
+            <p>Generates jokes in under 2 seconds each!</p>
             <div>
                 <button class="ai-info-btn" onclick="initializeAI()">Initialize AI Mode</button>
                 <button class="ai-info-btn secondary" onclick="cancelAIInit()">Use Local Vault</button>
@@ -495,13 +493,15 @@
     </div>
 
     <script type="module">
-        // Import WebLLM
-        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+        // Import ONNX Runtime Web for model inference
+        import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/ort.all.min.mjs";
+        // Import Transformers.js for GPT-2 tokenizer
+        import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
         // Configuration
         const API_URL = 'https://icanhazdadjoke.com/';
         const LOCAL_JOKES_FILE = 'jokes.json';
-        const AI_MODEL = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
+        const MODEL_PATH = './model/dad_joke_model.onnx';
 
         // State management
         let jokeSource = localStorage.getItem('jokeSource') || 'local';
@@ -509,7 +509,8 @@
         let seenJokes = new Set(JSON.parse(sessionStorage.getItem('seenJokes') || '[]'));
 
         // AI state
-        let aiEngine = null;
+        let aiSession = null;       // ONNX inference session
+        let aiTokenizer = null;     // GPT-2 tokenizer
         let aiInitialized = false;
         let aiStats = {
             generated: 0,
@@ -521,12 +522,6 @@
 
         // Debug mode
         const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === 'true';
-
-        // Mobile detection
-        function isMobileDevice() {
-            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-                   (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
-        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -540,17 +535,8 @@
                 console.error('Failed to load local jokes:', error);
             }
 
-            // Check for mobile or WebGPU support for AI mode
-            const aiButton = document.getElementById('aiButton');
-            if (isMobileDevice()) {
-                aiButton.disabled = true;
-                aiButton.title = 'AI mode not available on mobile devices (requires desktop browser)';
-                console.warn('Mobile device detected - AI mode disabled');
-            } else if (!navigator.gpu) {
-                aiButton.disabled = true;
-                aiButton.title = 'Requires Chrome 113+, Edge 113+, or Safari 18+ with WebGPU';
-                console.warn('WebGPU not supported - AI mode disabled');
-            }
+            // AI mode is available on all modern browsers (uses WebAssembly)
+            // No WebGPU or desktop-only restriction needed
 
             // Show debug stats if in debug mode
             if (DEBUG_MODE) {
@@ -608,26 +594,8 @@
         const validator = new JokeValidator();
 
         // ==============================================
-        // AI FUNCTIONS
+        // AI FUNCTIONS (Custom ONNX Model)
         // ==============================================
-
-        function getRandomExamples(count = 3) {
-            const examples = localJokes.slice();
-            const selected = [];
-            for (let i = 0; i < Math.min(count, examples.length); i++) {
-                const idx = Math.floor(Math.random() * examples.length);
-                selected.push(examples.splice(idx, 1)[0]);
-            }
-            return selected;
-        }
-
-        function buildAIPrompt(topic = null, attempt = 0) {
-            const examples = getRandomExamples(3 + attempt);
-            let prompt = "Generate a dad joke like these:\n\n";
-            examples.forEach((ex, i) => prompt += `${i + 1}. ${ex}\n\n`);
-            prompt += topic ? `New dad joke about: ${topic}` : 'New original dad joke:';
-            return prompt;
-        }
 
         function cleanAIJoke(raw) {
             let cleaned = raw
@@ -635,18 +603,80 @@
                 .replace(/^["']|["']$/g, '')
                 .trim();
 
-            if (!cleaned.includes('Q:') && !cleaned.includes('A:')) {
-                const parts = cleaned.split('?');
-                if (parts.length === 2) {
-                    cleaned = `Q: ${parts[0].trim()}?\nA: ${parts[1].trim()}`;
-                }
+            // Remove anything after a second "Q:" (model sometimes generates multiple jokes)
+            const secondQ = cleaned.indexOf('Q:', 3);
+            if (secondQ > 0) {
+                cleaned = cleaned.substring(0, secondQ).trim();
             }
 
             return cleaned;
         }
 
-        async function generateWithAI(topic = null) {
-            if (!aiEngine || !aiInitialized) {
+        function sampleFromLogits(logits, temperature, topK) {
+            // Apply temperature
+            const scaled = logits.map(v => v / temperature);
+
+            // Top-k filtering
+            const indexed = scaled.map((v, i) => [v, i]);
+            indexed.sort((a, b) => b[0] - a[0]);
+            const topKItems = indexed.slice(0, topK);
+
+            // Softmax over top-k
+            const maxVal = topKItems[0][0];
+            const exps = topKItems.map(([v, i]) => [Math.exp(v - maxVal), i]);
+            const sumExp = exps.reduce((s, [e]) => s + e, 0);
+            const probs = exps.map(([e, i]) => [e / sumExp, i]);
+
+            // Sample
+            let r = Math.random();
+            for (const [p, i] of probs) {
+                r -= p;
+                if (r <= 0) return i;
+            }
+            return probs[probs.length - 1][1];
+        }
+
+        async function generateWithONNX(temperature) {
+            // Start with "Q:" prompt
+            const promptIds = aiTokenizer.encode("Q:");
+            let inputIds = [...promptIds];
+            const maxNewTokens = 80;
+            const eosTokenId = aiTokenizer.model.eos_token_id;
+            const topK = 50;
+            const vocabSize = 50257;
+
+            for (let i = 0; i < maxNewTokens; i++) {
+                // Create input tensor
+                const inputTensor = new ort.Tensor('int64',
+                    BigInt64Array.from(inputIds.map(id => BigInt(id))),
+                    [1, inputIds.length]
+                );
+
+                // Run inference
+                const output = await aiSession.run({ input_ids: inputTensor });
+                const logits = output.logits.data;
+
+                // Get logits for last token position
+                const lastPos = inputIds.length - 1;
+                const startIdx = lastPos * vocabSize;
+                const lastLogits = Array.from(logits.slice(startIdx, startIdx + vocabSize));
+
+                // Sample next token
+                const nextToken = sampleFromLogits(lastLogits, temperature, topK);
+
+                // Stop at EOS
+                if (nextToken === eosTokenId) break;
+
+                inputIds.push(nextToken);
+            }
+
+            // Decode
+            const text = aiTokenizer.decode(inputIds, { skip_special_tokens: true });
+            return text.trim();
+        }
+
+        async function generateWithAI() {
+            if (!aiInitialized) {
                 throw new Error('AI not initialized');
             }
 
@@ -654,31 +684,13 @@
             const startTime = Date.now();
 
             for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-                const temp = 0.7 + (attempt * 0.1);
-                const userPrompt = buildAIPrompt(topic, attempt);
+                const temp = 0.8 + (attempt * 0.1);
 
                 if (DEBUG_MODE) {
-                    console.log(`[AI] Attempt ${attempt + 1}, temp=${temp}`);
+                    console.log('[AI] Attempt ' + (attempt + 1) + ', temp=' + temp);
                 }
 
-                const response = await aiEngine.chat.completions.create({
-                    messages: [
-                        {
-                            role: "system",
-                            content: `You are a dad joke expert. Generate ONE joke in this format:
-Q: [Setup question]
-A: [Punchline with pun]
-
-Family-friendly, groan-worthy, max 2 sentences. No explanations.`
-                        },
-                        { role: "user", content: userPrompt }
-                    ],
-                    temperature: temp,
-                    max_tokens: 100,
-                    top_p: 0.9
-                });
-
-                const raw = response.choices[0].message.content;
+                const raw = await generateWithONNX(temp);
                 const joke = cleanAIJoke(raw);
 
                 aiStats.generated++;
@@ -688,21 +700,21 @@ Family-friendly, groan-worthy, max 2 sentences. No explanations.`
                     aiStats.totalGenerationTime += Date.now() - startTime;
 
                     if (DEBUG_MODE) {
-                        console.log(`[AI] ✓ Accepted:`, joke);
+                        console.log('[AI] Accepted:', joke);
                         updateDebugStats();
                     }
 
                     return {
-                        id: `ai_${Date.now()}`,
+                        id: 'ai_' + Date.now(),
                         joke: joke
                     };
                 }
 
                 aiStats.rejected++;
-                if (DEBUG_MODE) console.log(`[AI] ✗ Rejected, retry...`);
+                if (DEBUG_MODE) console.log('[AI] Rejected:', joke);
             }
 
-            // All attempts failed
+            // All attempts failed — fallback
             aiStats.fallbackCount++;
             if (DEBUG_MODE) console.warn('[AI] Fallback to local');
             return null;
@@ -718,28 +730,40 @@ Family-friendly, groan-worthy, max 2 sentences. No explanations.`
                 aiInfo.style.display = 'none';
                 progressContainer.style.display = 'block';
 
-                aiEngine = await webllm.CreateMLCEngine(AI_MODEL, {
-                    initProgressCallback: (progress) => {
-                        const percent = Math.round((progress.progress || 0) * 100);
-                        progressBar.style.width = percent + '%';
-                        progressBar.textContent = percent + '%';
-                        progressText.textContent = progress.text || 'Loading...';
-                    }
+                // Step 1: Load tokenizer
+                progressText.textContent = 'Loading tokenizer...';
+                progressBar.style.width = '20%';
+                progressBar.textContent = '20%';
+                aiTokenizer = await AutoTokenizer.from_pretrained('Xenova/gpt2');
+
+                // Step 2: Load ONNX model
+                progressText.textContent = 'Loading custom dad joke model...';
+                progressBar.style.width = '50%';
+                progressBar.textContent = '50%';
+
+                aiSession = await ort.InferenceSession.create(MODEL_PATH, {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
                 });
 
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                progressText.textContent = 'Ready!';
+
                 aiInitialized = true;
-                progressContainer.style.display = 'none';
 
-                console.log('[AI] Initialized successfully!');
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                }, 500);
 
-                // Show success message
-                const jokeText = document.getElementById('jokeText');
-                jokeText.innerHTML = `<span style="color: #90EE90;">🤖 AI Mode Ready! Click BUILD A JOKE to generate.</span>`;
+                console.log('[AI] Custom model initialized!');
+
+                document.getElementById('jokeText').textContent = 'AI Mode Ready! Click BUILD A JOKE to generate.';
 
             } catch (error) {
                 console.error('[AI] Init failed:', error);
                 progressContainer.style.display = 'none';
-                alert(`AI initialization failed: ${error.message}\n\nSwitching to Local Vault.`);
+                alert('AI initialization failed: ' + error.message + '\n\nSwitching to Local Vault.');
                 switchSource('local');
             }
         }
@@ -775,28 +799,6 @@ Family-friendly, groan-worthy, max 2 sentences. No explanations.`
 
         // Switch joke source
         function switchSource(source) {
-            // Check if trying to use AI on mobile or unsupported browser
-            if (source === 'ai') {
-                if (isMobileDevice()) {
-                    alert('🤖 AI Mode Not Available on Mobile\n\n' +
-                          'AI joke generation requires:\n' +
-                          '• Desktop browser (Chrome/Edge 113+ or Safari 18+)\n' +
-                          '• ~2GB model download\n' +
-                          '• Significant processing power\n\n' +
-                          'Please use API or Local Vault mode on mobile, or try AI mode on a desktop computer!');
-                    return; // Don't switch to AI
-                } else if (!navigator.gpu) {
-                    alert('🤖 AI Mode Not Supported\n\n' +
-                          'Your browser doesn\'t support WebGPU, which is required for AI mode.\n\n' +
-                          'Supported browsers:\n' +
-                          '• Chrome 113+\n' +
-                          '• Edge 113+\n' +
-                          '• Safari 18+ (experimental)\n\n' +
-                          'Please update your browser or use API/Local Vault mode!');
-                    return; // Don't switch to AI
-                }
-            }
-
             jokeSource = source;
             localStorage.setItem('jokeSource', source);
             updateSourceButtons();
