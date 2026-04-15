@@ -1,8 +1,8 @@
 # AI Dad Joke Generator - Technical Architecture
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-20
-**Implementation Branch:** `feature/ai-joke-generation`
+**Document Version:** 2.0
+**Last Updated:** 2026-04-15
+**Implementation Branch:** `custom-joke-model-v2`
 
 ---
 
@@ -26,7 +26,7 @@
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │           JokeSourceManager                          │   │
 │  │  - selectSource(source)                              │   │
-│  │  - getJoke(topic)                                    │   │
+│  │  - getJoke()                                         │   │
 │  │  - trackSeenJoke(id)                                 │   │
 │  └────┬──────────────┬───────────────────┬──────────────┘   │
 └───────┼──────────────┼───────────────────┼──────────────────┘
@@ -36,19 +36,16 @@
 │ API Source  │ │Local Source │ │   AI Source              │
 │             │ │             │ │                          │
 │ - fetch()   │ │ - random()  │ │  ┌────────────────────┐  │
-│ - parse()   │ │ - filter()  │ │  │  DadJokeAI         │  │
+│ - parse()   │ │ - filter()  │ │  │  ONNX Runtime Web  │  │
 └─────────────┘ └─────────────┘ │  │                    │  │
-                                │  │ - initialize()     │  │
-                                │  │ - generate()       │  │
-                                │  │ - validate()       │  │
+                                │  │ - loadModel()      │  │
+                                │  │ - inference()      │  │
                                 │  └──────────┬─────────┘  │
                                 │             │            │
                                 │             ▼            │
                                 │  ┌────────────────────┐  │
-                                │  │  WebLLM Engine     │  │
-                                │  │                    │  │
-                                │  │ - loadModel()      │  │
-                                │  │ - inference()      │  │
+                                │  │  GPT-2 Tokenizer   │  │
+                                │  │  (Transformers.js) │  │
                                 │  └──────────┬─────────┘  │
                                 │             │            │
                                 │             ▼            │
@@ -64,23 +61,45 @@
 
 ---
 
+## Model Architecture
+
+### DadJokeTransformer (~25M Parameters)
+
+A custom decoder-only transformer trained from scratch on 4,500+ curated dad jokes.
+
+**Configuration:**
+```python
+class DadJokeConfig:
+    vocab_size = 50257      # GPT-2 tokenizer vocabulary
+    n_layers = 6            # Transformer blocks
+    n_heads = 8             # Attention heads
+    d_model = 512           # Hidden dimension
+    d_ff = 2048             # Feed-forward dimension
+    max_seq_len = 128       # Maximum sequence length
+    dropout = 0.1           # Dropout rate
+```
+
+**Architecture Details:**
+- Pre-norm (LayerNorm before attention/FFN)
+- Weight tying between token embedding and output head
+- Multi-head self-attention with causal masking
+- GELU activation in feed-forward layers
+- Learned positional embeddings
+
+**Training:**
+- Optimizer: AdamW (lr=3e-4, weight_decay=0.01)
+- Scheduler: Cosine annealing
+- Early stopping: patience=5 epochs
+- Hardware: M4 Mac Mini (MPS backend)
+- Data: 4,109 train / 457 validation jokes
+
+---
+
 ## Core Classes & Responsibilities
 
 ### 1. `JokeValidator`
 
 **Purpose:** Validate AI-generated jokes meet quality standards
-
-**Methods:**
-```javascript
-class JokeValidator {
-  validate(joke: string): ValidationResult
-  checkFormat(joke: string): boolean
-  detectWordplay(joke: string): boolean
-  containsProfanity(joke: string): boolean
-  hasMetaCommentary(joke: string): boolean
-  calculateQualityScore(joke: string): number
-}
-```
 
 **Validation Rules:**
 1. **Format Check:** Must match `Q: ... ? A: ...` pattern
@@ -108,20 +127,19 @@ Input Joke
 
 ---
 
-### 2. `DadJokeAI`
-
-**Purpose:** Manage WebLLM model and joke generation
+### 2. Browser-Side AI Generation
 
 **State:**
 ```javascript
 {
-  engine: WebLLMEngine | null,
+  aiSession: ort.InferenceSession | null,  // ONNX Runtime session
+  aiTokenizer: AutoTokenizer | null,        // GPT-2 tokenizer
   isInitialized: boolean,
   isGenerating: boolean,
   modelConfig: {
-    name: "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-    size: "~2GB",
-    quantization: "q4f16_1"
+    name: "DadJokeTransformer",
+    size: "~50-80MB",
+    format: "ONNX (quantized uint8)"
   },
   stats: {
     generated: number,
@@ -133,100 +151,55 @@ Input Joke
 }
 ```
 
-**Methods:**
-```javascript
-class DadJokeAI {
-  async initialize(onProgress): Promise<void>
-  async generateJoke(topic?: string): Promise<Joke>
-  async generateWithQuality(topic?: string, maxAttempts: 3): Promise<Joke>
-  buildPrompt(topic?: string, attemptNumber: number): string
-  cleanJoke(rawOutput: string): string
-  getStats(): Stats
-  unload(): void
-}
-```
-
 **Generation Flow:**
 ```
-generateJoke(topic)
+generateWithONNX(temperature)
     │
-    ├─► Build Few-Shot Prompt
-    │   ├─ Get 3-6 random examples from static DB
-    │   ├─ Build system prompt with rules
-    │   └─ Add user prompt with topic
+    ├─► Tokenize "Q:" prompt with GPT-2 tokenizer
     │
-    ├─► Attempt 1 (temp=0.7)
-    │   ├─► Model Inference (2-5s)
-    │   ├─► Clean Output
-    │   ├─► Validate
-    │   └─► PASS? ──► Return Joke
-    │       │
-    │       FAIL
-    │       │
-    ├─► Attempt 2 (temp=0.8)
-    │   ├─► Model Inference
-    │   ├─► Clean Output
-    │   ├─► Validate
-    │   └─► PASS? ──► Return Joke
-    │       │
-    │       FAIL
-    │       │
-    ├─► Attempt 3 (temp=0.9)
-    │   ├─► Model Inference
-    │   ├─► Clean Output
-    │   ├─► Validate
-    │   └─► PASS? ──► Return Joke
-    │       │
-    │       FAIL
-    │       │
-    └─► Fallback to Static Database
+    ├─► Autoregressive generation loop:
+    │   ├─ Run ONNX inference (input_ids → logits)
+    │   ├─ Apply temperature scaling
+    │   ├─ Top-k filtering (k=50)
+    │   ├─ Softmax → sample next token
+    │   ├─ Append to sequence
+    │   └─ Stop at EOS or max_length
+    │
+    ├─► Decode token IDs back to text
+    │
+    ├─► Validate with JokeValidator
+    │   ├─► PASS → Return joke
+    │   └─► FAIL → Retry (up to 3x, increasing temperature)
+    │
+    └─► All failed → Fallback to Local DB
 ```
 
----
-
-### 3. `PromptBuilder`
-
-**Purpose:** Construct optimal prompts for joke generation
-
-**System Prompt Template:**
-```
-You are a professional dad joke writer. Generate ONE dad joke following this exact format:
-
-Q: [Setup with question]
-A: [Punchline with wordplay]
-
-Requirements:
-- Must use wordplay, puns, or homophones
-- Must be family-friendly (G-rated)
-- Must be groan-worthy but clever
-- Maximum 2 sentences total
-- No explanations or meta-commentary
-```
-
-**Few-Shot Example Selection:**
+**Key Function:**
 ```javascript
-function getRandomExamples(count, previousExamples = []) {
-  // Select N examples from static database
-  // Ensure diversity (no repeated examples)
-  // Prioritize high-quality examples
-  // Return in consistent format
+async function generateWithONNX(temperature = 0.8) {
+    const inputText = "Q:";
+    const inputIds = aiTokenizer.encode(inputText);
+    let generatedIds = [...inputIds];
+
+    for (let i = 0; i < 80; i++) {
+        const tensor = new ort.Tensor('int64',
+            BigInt64Array.from(generatedIds.map(id => BigInt(id))),
+            [1, generatedIds.length]);
+
+        const output = await aiSession.run({ input_ids: tensor });
+        const logits = output.logits.data;
+        const seqLen = generatedIds.length;
+        const vocabSize = 50257;
+        const lastLogits = logits.slice((seqLen - 1) * vocabSize, seqLen * vocabSize);
+
+        const nextToken = sampleFromLogits(lastLogits, temperature, 50);
+
+        if (nextToken === eosTokenId) break;
+        generatedIds.push(nextToken);
+    }
+
+    return aiTokenizer.decode(generatedIds);
 }
-```
-
-**User Prompt Template:**
-```
-Generate a dad joke like these examples:
-
-1. Q: Why don't scientists trust atoms?
-   A: Because they make up everything!
-
-2. Q: What do you call a factory that makes okay products?
-   A: A satisfactory!
-
-3. Q: Why did the scarecrow win an award?
-   A: He was outstanding in his field!
-
-Now create a NEW original dad joke about: {topic}
 ```
 
 ---
@@ -260,29 +233,32 @@ Check selected source (API / Local / AI)
                               ├─► NOT INIT ──► Show init UI
                               │                      │
                               │                      ▼
-                              │               Download model (2GB)
+                              │               Load GPT-2 tokenizer
                               │                      │
                               │                      ▼
-                              │               Initialize engine
+                              │               Load ONNX model (~50-80MB)
+                              │                      │
+                              │                      ▼
+                              │               Create InferenceSession
                               │                      │
                               │                      ▼
                               │                  Continue...
                               │
                               └─► INITIALIZED ──► Generate joke
                                                       │
-                                                      ├─► Attempt 1
+                                                      ├─► Attempt 1 (temp=0.7)
                                                       │      │
                                                       │      ├─► VALID ──► Display
                                                       │      │
                                                       │      └─► INVALID
                                                       │             │
-                                                      ├─► Attempt 2
+                                                      ├─► Attempt 2 (temp=0.8)
                                                       │      │
                                                       │      ├─► VALID ──► Display
                                                       │      │
                                                       │      └─► INVALID
                                                       │             │
-                                                      ├─► Attempt 3
+                                                      ├─► Attempt 3 (temp=0.9)
                                                       │      │
                                                       │      ├─► VALID ──► Display
                                                       │      │
@@ -293,68 +269,51 @@ Check selected source (API / Local / AI)
 
 ---
 
-## WebLLM Integration Details
+## ONNX Runtime Web Integration
 
 ### Model Loading Sequence
 
 ```javascript
-1. Import WebLLM
-   import * as webllm from "https://esm.run/@mlc-ai/web-llm"
+1. Import ONNX Runtime Web + Transformers.js
+   import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"
+   import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers"
 
-2. Check WebGPU Support
-   if (!navigator.gpu) throw new Error("WebGPU not supported")
+2. Load GPT-2 Tokenizer
+   aiTokenizer = await AutoTokenizer.from_pretrained('gpt2')
 
-3. Create Engine with Progress Callback
-   const engine = await webllm.CreateMLCEngine(
-     "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-     {
-       initProgressCallback: (progress) => {
-         // Update UI with download/init progress
-         updateProgress(progress.text, progress.progress);
-       }
-     }
+3. Create ONNX Inference Session
+   aiSession = await ort.InferenceSession.create(
+     './model/dad_joke_model.onnx',
+     { executionProviders: ['wasm'] }
    )
 
-4. Store Engine Reference
-   this.engine = engine
-   this.isInitialized = true
+4. Ready for generation
 ```
 
-### Progress Events
+### Inference Loop
 
 ```javascript
-Progress Events:
-1. "Fetching param cache[0/1]"
-2. "Loading model from cache[0/291]"
-3. "Loading model from cache[100/291]"
-4. "Loading model from cache[200/291]"
-5. "Loading model from cache[291/291]"
-6. "Initializing VM"
-7. "Initializing WebGPU"
-8. "Ready"
-```
+// Autoregressive token-by-token generation
+for (let step = 0; step < maxNewTokens; step++) {
+    // Create input tensor
+    const tensor = new ort.Tensor('int64',
+        BigInt64Array.from(ids.map(id => BigInt(id))),
+        [1, ids.length]);
 
-### Inference Call
+    // Run model
+    const output = await aiSession.run({ input_ids: tensor });
 
-```javascript
-const response = await engine.chat.completions.create({
-  messages: [
-    {
-      role: "system",
-      content: systemPrompt
-    },
-    {
-      role: "user",
-      content: userPrompt
-    }
-  ],
-  temperature: 0.7,        // Creativity vs consistency
-  max_tokens: 100,         // Limit response length
-  top_p: 0.9,             // Nucleus sampling
-  frequency_penalty: 0.3   // Reduce repetition
-});
+    // Get logits for last position
+    const lastLogits = extractLastPosition(output.logits);
 
-const jokeText = response.choices[0].message.content;
+    // Sample with temperature and top-k
+    const nextToken = sampleFromLogits(lastLogits, temperature, topK);
+
+    // Check for end of sequence
+    if (nextToken === eosTokenId) break;
+
+    ids.push(nextToken);
+}
 ```
 
 ---
@@ -369,7 +328,6 @@ function validateFormat(joke) {
   const hasQ = /Q:|Question:/i.test(joke);
   const hasA = /A:|Answer:/i.test(joke);
   const hasQuestion = /\?/.test(joke);
-
   return hasQ && hasA && hasQuestion;
 }
 ```
@@ -380,318 +338,138 @@ function validateContent(joke) {
   const isShort = joke.length >= 20 && joke.length <= 200;
   const isClean = !containsProfanity(joke);
   const noMeta = !/(here's|I made|joke about|example)/i.test(joke);
-
   return isShort && isClean && noMeta;
 }
 ```
 
 **Stage 3: Quality Scoring**
-```javascript
-function calculateQualityScore(joke) {
-  let score = 0;
-
-  // Length sweet spot (50-150 chars)
-  if (joke.length >= 50 && joke.length <= 150) score += 30;
-
-  // Has question mark
-  if (/\?/.test(joke)) score += 20;
-
-  // Has exclamation (enthusiasm)
-  if (/!/.test(joke)) score += 10;
-
-  // Contains common dad joke patterns
-  if (/\b(why|what|how)\b/i.test(joke)) score += 15;
-  if (/\b(because|so|they|it)\b/i.test(joke)) score += 10;
-
-  // Wordplay indicators
-  if (detectWordplay(joke)) score += 25;
-
-  // Penalties
-  if (joke.length > 200) score -= 20;
-  if (/(here's|I made)/i.test(joke)) score -= 50;
-
-  return score;
-}
-```
+- Length sweet spot (50-150 chars): +30
+- Has question mark: +20
+- Has exclamation: +10
+- Common dad joke patterns: +15
+- Wordplay detected: +25
+- Penalties for excessive length or meta-commentary
 
 **Acceptance Threshold:** Score >= 60
 
 ---
 
-## Performance Optimization
+## Performance
 
 ### Caching Strategy
 
 ```javascript
-// Model caching (automatic via WebLLM)
-IndexedDB: "mlc-chat-config"
-  ├─ model weights (2GB)
-  ├─ tokenizer config
-  └─ runtime config
+// Model caching (IndexedDB, automatic via browser)
+IndexedDB:
+  ├─ ONNX model weights (~50-80MB, cached after first download)
+  └─ GPT-2 tokenizer files (cached by Transformers.js)
 
-// Example caching (manual)
-sessionStorage: "fewShotExamples"
-  └─ Pre-selected high-quality examples
-
-// Seen jokes tracking (existing)
+// Seen jokes tracking
 sessionStorage: "seenJokes"
   └─ Set of seen joke IDs
 ```
 
-### Memory Management
+### Key Metrics
 
-```javascript
-// Unload model when switching sources
-function switchSource(newSource) {
-  if (currentSource === 'ai' && newSource !== 'ai') {
-    await dadJokeAI.unload();  // Free VRAM
-  }
+| Metric | Target |
+|--------|--------|
+| Model download | ~50-80MB (one-time) |
+| Model load time | 2-5 seconds |
+| Generation time | 2-5 seconds per joke |
+| Validation pass rate | 85-95% |
+| Memory usage | < 200MB |
 
-  if (newSource === 'ai' && !dadJokeAI.isInitialized) {
-    await dadJokeAI.initialize();  // Reload if needed
-  }
+---
 
-  currentSource = newSource;
-}
+## Training Pipeline
+
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/model.py` | DadJokeTransformer architecture definition |
+| `scripts/train_from_scratch.py` | Training loop with early stopping |
+| `scripts/evaluate_custom_model.py` | Generate N jokes and measure quality |
+| `scripts/export_to_onnx.py` | Export to ONNX + uint8 quantization |
+| `scripts/joke_validator.py` | Python-side joke validation |
+
+### Training Data
+
+- **Source:** 4,566 unique dad jokes generated by Claude
+- **Format:** JSONL with `{"text": "Q: ... A: ..."}` entries
+- **Split:** 90% train (4,109) / 10% validation (457)
+- **Categories:** 20+ (science, food, animals, tech, music, etc.)
+
+### Training Process
+
 ```
-
-### Lazy Loading
-
-```javascript
-// Only load WebLLM when AI mode selected
-let webllmModule = null;
-
-async function initializeAIMode() {
-  if (!webllmModule) {
-    webllmModule = await import("https://esm.run/@mlc-ai/web-llm");
-  }
-
-  // ... initialize engine
-}
+training_data/dad_jokes_train.jsonl
+         │
+         ▼
+scripts/train_from_scratch.py
+  ├─ GPT-2 tokenizer (pre-trained, frozen)
+  ├─ DadJokeTransformer (~25M params, random init)
+  ├─ AdamW optimizer + cosine annealing
+  ├─ Early stopping (patience=5)
+  └─ Saves best model by validation loss
+         │
+         ▼
+dad-joke-model/best_model.pt
+         │
+         ▼
+scripts/export_to_onnx.py
+  ├─ ONNX export (opset 17, dynamic axes)
+  └─ uint8 quantization
+         │
+         ▼
+model/dad_joke_model.onnx  →  Deployed in browser
 ```
 
 ---
 
 ## Error Handling
 
-### Error Categories & Recovery
-
 | Error Type | Detection | Recovery Strategy |
 |------------|-----------|-------------------|
-| **WebGPU Not Supported** | `!navigator.gpu` | Hide AI button, show browser requirements |
-| **Model Download Failed** | Network error during fetch | Retry with exponential backoff (3 attempts) |
-| **Out of Memory** | WebGPU allocation error | Unload model, suggest closing tabs, fallback to Local |
-| **Generation Timeout** | Inference >30s | Cancel generation, fallback to Local |
-| **Validation Failed** | All 3 attempts invalid | Silent fallback to static DB |
-| **Model Corrupted** | Initialization error | Clear IndexedDB cache, re-download |
-
-### Error Logging
-
-```javascript
-class ErrorLogger {
-  static log(error, context) {
-    console.error(`[DadJokeAI] ${context}:`, error);
-
-    // Track for debugging
-    if (window.aiErrors) {
-      window.aiErrors.push({
-        timestamp: Date.now(),
-        context,
-        error: error.message,
-        stack: error.stack
-      });
-    }
-  }
-
-  static getReport() {
-    return window.aiErrors || [];
-  }
-}
-```
+| **Model Download Failed** | Network error | Retry, then fallback to Local mode |
+| **ONNX Session Error** | Initialization error | Show error, fallback to Local mode |
+| **Generation Timeout** | Inference >30s | Cancel, fallback to Local |
+| **Validation Failed** | All 3 attempts invalid | Silent fallback to Local DB |
+| **Tokenizer Error** | Load failure | Fallback to Local mode |
 
 ---
 
-## Testing Strategy
+## Security & Privacy
 
-### Unit Tests
-
-```javascript
-// JokeValidator tests
-describe('JokeValidator', () => {
-  test('accepts valid dad joke', () => {
-    const joke = "Q: Why don't scientists trust atoms?\nA: Because they make up everything!";
-    expect(validator.validate(joke)).toBe(true);
-  });
-
-  test('rejects joke without question mark', () => {
-    const joke = "Q: Why don't scientists trust atoms\nA: Because they make up everything!";
-    expect(validator.validate(joke)).toBe(false);
-  });
-
-  test('detects wordplay in "make up"', () => {
-    const joke = "They make up everything!";
-    expect(validator.detectWordplay(joke)).toBe(true);
-  });
-});
-```
-
-### Integration Tests
-
-```javascript
-// AI Generation tests
-describe('DadJokeAI', () => {
-  test('generates valid joke within 10 seconds', async () => {
-    const start = Date.now();
-    const joke = await dadJokeAI.generateJoke();
-    const duration = Date.now() - start;
-
-    expect(joke).toBeTruthy();
-    expect(validator.validate(joke)).toBe(true);
-    expect(duration).toBeLessThan(10000);
-  });
-
-  test('falls back after 3 failed attempts', async () => {
-    // Mock validator to always fail
-    validator.validate = jest.fn(() => false);
-
-    const joke = await dadJokeAI.generateJoke();
-
-    // Should have fallen back to static DB
-    expect(joke.source).toBe('local');
-  });
-});
-```
-
-### Load Tests
-
-```javascript
-// Stress test
-test('handles 100 rapid generations without crash', async () => {
-  const promises = [];
-
-  for (let i = 0; i < 100; i++) {
-    promises.push(dadJokeAI.generateJoke());
-  }
-
-  const results = await Promise.all(promises);
-
-  expect(results.length).toBe(100);
-  expect(results.every(r => r.joke)).toBe(true);
-});
-```
+- All processing happens client-side (no server calls except initial model download)
+- No user data collected or transmitted
+- Custom model is open-source and family-friendly
+- Profanity filter prevents inappropriate outputs
 
 ---
 
-## Security Considerations
+## Browser Compatibility
 
-### Privacy
-
-✅ **All processing happens client-side**
-- No data sent to external servers (except model download)
-- No user tracking
-- No analytics
-
-✅ **Model weights are public**
-- Qwen2.5 is open-source (Apache 2.0)
-- No proprietary data
-
-### Content Safety
-
-✅ **Profanity filter** prevents inappropriate jokes
-✅ **Validation layer** ensures family-friendly content
-✅ **Fallback system** always available
-
----
-
-## Deployment Checklist
-
-### Pre-Deployment
-
-- [ ] Test on Chrome 113+
-- [ ] Test on Edge 113+
-- [ ] Test on Safari 18+ (if available)
-- [ ] Verify model loads successfully
-- [ ] Verify 20+ generated jokes are quality
-- [ ] Test error handling (network offline, etc.)
-- [ ] Verify graceful degradation
-- [ ] Check memory usage (<3GB total)
-- [ ] Test mobile detection/disable
-
-### Post-Deployment
-
-- [ ] Monitor error rates
-- [ ] Track validation pass rates
-- [ ] Collect user feedback
-- [ ] A/B test model selection
-- [ ] Optimize prompt engineering
-
----
-
-## Monitoring & Analytics
-
-### Key Metrics to Track
-
-```javascript
-window.aiMetrics = {
-  modelLoadTime: number,           // Time to load model
-  avgGenerationTime: number,       // Avg time per joke
-  validationPassRate: number,      // % passed validation
-  fallbackRate: number,            // % fell back to static
-  errorRate: number,               // % of errors
-  userSatisfaction: number         // Future: thumbs up/down
-};
-```
-
-### Debug Mode
-
-```javascript
-// Enable with ?debug=true
-if (new URLSearchParams(location.search).get('debug')) {
-  showAIDebugPanel();
-}
-
-function showAIDebugPanel() {
-  // Display live metrics
-  // Show validation details
-  // Log prompts and responses
-  // Display quality scores
-}
-```
+| Browser | Support |
+|---------|---------|
+| Chrome 113+ | Full support (WebAssembly) |
+| Edge 113+ | Full support (WebAssembly) |
+| Safari 16+ | Full support (WebAssembly) |
+| Firefox 100+ | Full support (WebAssembly) |
+| Mobile browsers | Supported (~50-80MB download) |
 
 ---
 
 ## Future Optimizations
 
-### Model Optimization
-- [ ] Fine-tune Qwen2.5 on dad jokes dataset
-- [ ] Quantize to 3-bit for smaller size
-- [ ] Explore distillation to 1B model
-
-### Prompt Optimization
-- [ ] A/B test system prompts
-- [ ] Optimize few-shot example selection
-- [ ] Dynamic temperature based on topic
-
-### Performance
-- [ ] Implement streaming inference (show joke as generated)
+- [ ] Fine-tune with more training data (10,000+ jokes)
+- [ ] Experiment with model size (larger for quality, smaller for speed)
+- [ ] Implement streaming generation (show joke as it's generated)
 - [ ] Batch generation (generate 5, cache 4)
-- [ ] Pre-warm model on page load
+- [ ] WebGPU execution provider for faster inference
+- [ ] Topic-conditioned generation
 
 ---
 
-## Conclusion
-
-This architecture balances:
-- **Quality:** Multi-layer validation ensures high standards
-- **Performance:** Efficient model, caching, lazy loading
-- **UX:** Progressive enhancement, clear feedback
-- **Robustness:** Fallbacks at every layer
-- **Maintainability:** Clear separation of concerns
-
-The result is a production-ready AI feature that showcases modern web ML while maintaining the simplicity and reliability of the core application.
-
----
-
-**Document Status:** ✅ Complete
-**Implementation Status:** 🚧 In Progress
-**Next Steps:** Begin implementation of JokeValidator class
+**Document Status:** Updated for custom DadJokeTransformer
+**Implementation Status:** Model architecture + browser integration complete; training pending

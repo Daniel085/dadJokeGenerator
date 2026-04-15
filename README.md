@@ -20,7 +20,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - **🔀 Triple Joke Sources**
   - **🌐 Live API Mode**: Fetches jokes from [icanhazdadjoke.com](https://icanhazdadjoke.com) (1000+ jokes)
   - **📦 Local Vault Mode**: Curated collection of 750+ dad jokes stored locally
-  - **🤖 AI Generated Mode**: Uses WebLLM to generate unlimited unique dad jokes on-device
+  - **🤖 AI Generated Mode**: Custom-trained 25M parameter transformer generates unique dad jokes on-device via ONNX Runtime Web (~50-80MB model, works on desktop & mobile)
   - User-selectable toggle between all three sources
   - Automatic fallback: If API or AI fails, seamlessly switches to local jokes
 
@@ -61,11 +61,11 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 
 **⚠️ Desktop Only - Not available on mobile devices**
 
-**Cutting-edge on-device AI joke generation using WebLLM**
+**Custom-trained AI model generates dad jokes directly in your browser**
 
-- **Model**: Qwen2.5-3B-Instruct (2GB, optimized for creativity)
-- **Technology**: WebLLM + WebGPU for browser-based ML inference
-- **Platform**: Desktop browsers only (mobile devices not supported)
+- **Model**: DadJokeTransformer (~25M parameters, trained on 4,500+ curated jokes)
+- **Technology**: ONNX Runtime Web (WebAssembly) + GPT-2 tokenizer
+- **Platform**: Any modern browser (desktop & mobile)
 - **Quality Control**: Multi-layer validation system ensures dad-joke quality
 - **Generation Process**:
   1. Few-shot prompting with 3-6 curated examples
@@ -86,17 +86,14 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - **Desktop browser** (required):
   - Chrome 113+ ✅
   - Edge 113+ ✅
-  - Safari 18+ ⚠️ (experimental WebGPU support)
-  - Firefox ❌ (WebGPU coming soon)
-- **Mobile devices**: ❌ Not supported
-  - WebGPU not available on mobile browsers
-  - 2GB model download impractical on mobile data
-  - Insufficient RAM/VRAM on most mobile devices
+  - Safari 16+ ✅
+  - Firefox 100+ ✅
+- **Mobile devices**: ✅ Supported (model is only ~50-80MB)
   - Use API or Local Vault mode on mobile instead
 
 **First-Time Setup:**
-- One-time model download (~2GB, cached)
-- 20-30 second initialization
+- One-time model download (~50-80MB, cached)
+- A few seconds to initialize
 - Subsequent page loads: instant (model cached in IndexedDB)
 
 **Debug Mode:**
@@ -111,7 +108,7 @@ Add `?debug=true` to URL to see real-time AI statistics:
 User clicks "BUILD A JOKE"
          │
          ▼
-AI generates joke with Qwen2.5-3B
+AI generates joke with custom DadJokeTransformer
          │
          ├─► Validation Layer
          │   ├─ Format check (Q: ... A: ...)
@@ -339,7 +336,7 @@ npx http-server
   - Retry logic works (up to 3 attempts)
   - Falls back to local DB when all attempts fail
   - Debug mode shows accurate statistics
-  - WebGPU detection disables AI on unsupported browsers
+  - Graceful fallback to Local Vault on model load failure
 
 - [x] **Anti-Repeat System**
   - Confirm no duplicates in single session
@@ -369,18 +366,17 @@ npx http-server
 - **HTML5** - Semantic markup
 - **CSS3** - Custom styling, gradients, animations, responsive design
 - **JavaScript (ES6 Modules)** - Modern vanilla JS, no frameworks
-- **WebLLM** - Browser-based large language model inference
-- **WebGPU** - Hardware-accelerated ML computation
+- **ONNX Runtime Web** - Browser-based neural network inference (WebAssembly)
+- **Transformers.js** - GPT-2 tokenizer for the custom model
 - **Web APIs**:
   - `fetch()` for HTTP requests
   - `sessionStorage` for temporary state
   - `localStorage` for persistent preferences
-  - `navigator.gpu` for WebGPU detection
-  - IndexedDB (automatic via WebLLM) for model caching
+  - IndexedDB for model caching
 - **External APIs**:
   - [icanhazdadjoke.com](https://icanhazdadjoke.com) - Free dad joke API
-  - [WebLLM CDN](https://esm.run/@mlc-ai/web-llm) - AI model runtime
-- **AI Model**: Qwen2.5-3B-Instruct (Alibaba, Apache 2.0 license)
+  - [ONNX Runtime Web CDN](https://cdn.jsdelivr.net/npm/onnxruntime-web) - ML inference runtime
+- **AI Model**: Custom DadJokeTransformer (~25M params, trained from scratch on 4,500+ jokes)
 
 ### Why No Frameworks?
 
@@ -469,8 +465,8 @@ This project is open source and available under the [MIT License](LICENSE).
 ## 🙏 Acknowledgments
 
 - **icanhazdadjoke.com** - For providing the free dad joke API
-- **WebLLM Team** - For making browser-based LLM inference possible
-- **Alibaba Qwen Team** - For the excellent Qwen2.5-3B model
+- **ONNX Runtime Team** - For making browser-based ML inference possible
+- **Hugging Face** - For Transformers.js and GPT-2 tokenizer
 - **Dad joke writers everywhere** - For the groan-worthy puns
 
 ---
@@ -505,9 +501,9 @@ This project is open source and available under the [MIT License](LICENSE).
   - Multi-layer validation system
   - Profanity filtering, wordplay detection
   - Quality scoring algorithm
-- WebLLM Integration: 20 minutes
-  - Model selection and configuration
-  - Few-shot prompting system
+- ONNX Runtime Web Integration: 20 minutes
+  - Custom model loading and inference
+  - Browser-side autoregressive generation
   - Retry logic with temperature adjustment
 - UI Enhancements: 15 minutes
   - AI mode button and purple theme
@@ -521,7 +517,7 @@ Built over coffee with Claude Code, demonstrating:
 - Rapid prototyping and full-stack web development
 - Cutting-edge ML/AI integration
 - Production-quality code with comprehensive documentation
-- Modern web technologies (WebGPU, ES6 modules, WebLLM)
+- Modern web technologies (ONNX Runtime Web, ES6 modules, WebAssembly)
 
 ---
 

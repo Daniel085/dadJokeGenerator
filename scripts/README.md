@@ -1,499 +1,158 @@
-# 🛠️ Training Scripts Documentation
+# Training Scripts - DadJokeTransformer
 
-This directory contains all the scripts needed to fine-tune a custom dad joke model and deploy it to Hugging Face.
+Scripts for training, evaluating, and exporting a custom ~25M parameter transformer that generates dad jokes.
 
-## 📋 Overview
+## Prerequisites
 
-The training pipeline consists of 6 main phases:
-
-1. **Data Generation** - Generate training jokes using Claude
-2. **Environment Setup** - Install dependencies on Mac mini
-3. **Model Training** - Fine-tune TinyLlama with LoRA
-4. **Evaluation** - Validate model quality
-5. **WebLLM Conversion** - Prepare for browser deployment
-6. **Deployment** - Upload to Hugging Face
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Mac mini (M1/M2/M3 recommended) or any machine with 8GB+ RAM
 - Python 3.10+
-- 50GB free disk space
-- Internet connection for initial downloads
+- Mac mini (M1/M2/M3/M4) recommended, or any machine with 8GB+ RAM
 
 ### Installation
 
 ```bash
-# 1. Navigate to project root
-cd ~/dadJokeGenerator
-
-# 2. Create virtual environment
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Install dependencies
+# Install dependencies
 pip install -r scripts/requirements.txt
 
-# 4. Verify installation
+# Verify PyTorch + MPS
 python3 -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'MPS: {torch.backends.mps.is_available()}')"
 ```
 
-Expected output:
-```
-PyTorch: 2.1.0+
-MPS: True
-```
-
 ---
 
-## 📝 Script Reference
+## Scripts
 
-### 1. `joke_validator.py`
+### `model.py` - Model Architecture
 
-**Purpose:** Validate dad jokes against quality criteria
+Defines the DadJokeTransformer: a decoder-only transformer (~25M parameters) with:
 
-**Usage:**
+- 6 transformer layers, 8 attention heads, 512 hidden dim
+- Pre-norm architecture (LayerNorm before attention/FFN)
+- Weight tying between token embedding and output head
+- GPT-2 tokenizer (50,257 vocab)
+
 ```bash
-# Test the validator
+# Verify model builds correctly
+python3 -c "from scripts.model import DadJokeTransformer, DadJokeConfig; m = DadJokeTransformer(DadJokeConfig()); print(f'Params: {sum(p.numel() for p in m.parameters()):,}')"
+```
+
+### `joke_validator.py` - Quality Validation
+
+Validates generated jokes against quality criteria:
+
+- Format check (Q: ... ? A: ...)
+- Length check (20-200 characters)
+- Profanity filter
+- Wordplay/pun detection
+- Meta-commentary removal
+
+```bash
 python3 scripts/joke_validator.py
 ```
 
-**What it does:**
-- Checks joke format (Q: A: structure)
-- Validates length (20-200 characters)
-- Filters profanity
-- Detects wordplay/puns
-- Removes meta-commentary
+### `train_from_scratch.py` - Training
 
-**Import in other scripts:**
-```python
-from joke_validator import JokeValidator
+Trains the DadJokeTransformer on curated dad jokes.
 
-validator = JokeValidator()
-is_valid, failures = validator.validate("Q: Why? A: Because!")
-```
-
----
-
-### 2. `generate_training_data.py`
-
-**Purpose:** Generate and validate training data using Claude
-
-**Usage:**
-
-**Step 1: See the generation workflow**
 ```bash
-python3 scripts/generate_training_data.py
+python3 scripts/train_from_scratch.py
 ```
 
-This displays the prompt to use with Claude for joke generation.
+**Configuration** (edit at top of script):
+- Epochs: 20 (with early stopping, patience=5)
+- Batch size: 32
+- Learning rate: 3e-4 (cosine annealing)
+- Gradient clipping: 1.0
 
-**Step 2: Generate jokes with Claude**
-- Copy the prompt shown by the script
-- Paste into Claude conversation
-- Claude will generate 100 jokes as JSON array
-- Save response to `batch_001.json`
+**Input:** `training_data/dad_jokes_train.jsonl` and `training_data/dad_jokes_validation.jsonl`
 
-**Step 3: Validate the batch**
+**Output:** `dad-joke-model/best_model.pt`
+
+**Estimated time:** 15-30 minutes on M4 Mac Mini
+
+### `evaluate_custom_model.py` - Evaluation
+
+Generates N jokes and measures validation pass rate.
+
 ```bash
-python3 scripts/generate_training_data.py --validate batch_001.json
+# Default: 100 samples from dad-joke-model/best_model.pt
+python3 scripts/evaluate_custom_model.py
+
+# Custom checkpoint and sample count
+python3 scripts/evaluate_custom_model.py dad-joke-model/best_model.pt 200
 ```
 
-Output:
-```
-📊 Validation Results for batch_001.json
-Total: 100
-✅ Valid: 87 (87.0%)
-❌ Invalid: 13
+**Target:** 80%+ validation pass rate
 
-✅ Saved 87 jokes to training_data/validated_batch_001.jsonl
-```
+### `export_to_onnx.py` - ONNX Export
 
-**Step 4: Repeat**
-- Generate multiple batches (batch_002.json, batch_003.json, etc.)
-- Aim for 10,000-50,000 total jokes
-- Use different few-shot examples each time for diversity
+Exports trained model to ONNX format for browser deployment.
 
-**Step 5: Combine and split**
 ```bash
-# Combine all validated batches
-cat training_data/validated_*.jsonl > training_data/all_jokes.jsonl
+# Default paths
+python3 scripts/export_to_onnx.py
 
-# Split into train/validation (90/10)
-total=$(wc -l < training_data/all_jokes.jsonl)
-train_count=$((total * 9 / 10))
-
-head -n $train_count training_data/all_jokes.jsonl > training_data/dad_jokes_train.jsonl
-tail -n +$((train_count + 1)) training_data/all_jokes.jsonl > training_data/dad_jokes_validation.jsonl
-
-echo "✅ Training set: $(wc -l < training_data/dad_jokes_train.jsonl) jokes"
-echo "✅ Validation set: $(wc -l < training_data/dad_jokes_validation.jsonl) jokes"
-```
-
----
-
-### 3. `train_dad_joke_model.py`
-
-**Purpose:** Fine-tune TinyLlama on dad jokes using LoRA
-
-**Usage:**
-```bash
-python3 scripts/train_dad_joke_model.py
+# Custom paths
+python3 scripts/export_to_onnx.py dad-joke-model/best_model.pt dad-joke-model/model.onnx
 ```
 
 **What it does:**
-1. Loads TinyLlama-1.1B-Chat-v1.0 base model
-2. Configures LoRA adapters (trainable: 0.4% of params)
-3. Loads training data from `training_data/dad_jokes_train.jsonl`
-4. Trains for 3 epochs
-5. Saves fine-tuned model to `./dad-joke-model/final`
+1. Loads PyTorch checkpoint
+2. Exports to ONNX (opset 17, dynamic axes)
+3. Quantizes to uint8 (reduces size ~60-75%)
+4. Verifies with ONNX Runtime
 
-**Expected output:**
-```
-🎓 Dad Joke Model Training
-============================================================
-🎮 Using MPS (Apple Silicon GPU)
-📚 Loading tokenizer...
-🧠 Loading base model...
-🔧 Configuring LoRA...
-   Trainable params: 4,718,592
-   All params: 1,104,718,592
-   Trainable: 0.43%
-
-🎓 Starting training...
-============================================================
-Epoch 1/3: 100%|████████| 625/625 [45:23<00:00, Loss: 1.234]
-Epoch 2/3: 100%|████████| 625/625 [43:12<00:00, Loss: 0.876]
-Epoch 3/3: 100%|████████| 625/625 [42:48<00:00, Loss: 0.654]
-
-✅ Training complete!
-📁 Model saved to: ./dad-joke-model/final
-```
-
-**Estimated training time:**
-- M1 Mac mini: 2-3 hours
-- M2 Mac mini: 1.5-2.5 hours
-- Intel Mac mini: 8-12 hours
-
-**Troubleshooting:**
-- **Out of memory:** Reduce `BATCH_SIZE` from 4 to 2
-- **Too slow:** Reduce dataset size or epochs
-- **Poor quality:** Increase epochs to 5 or add more training data
+**Output:** `dad-joke-model/dad_joke_model.onnx` and `dad-joke-model/dad_joke_model_quantized.onnx`
 
 ---
 
-### 4. `test_model.py`
+## Complete Workflow
 
-**Purpose:** Interactively test the fine-tuned model
-
-**Usage:**
 ```bash
-python3 scripts/test_model.py
-```
+# 1. Train the model
+python3 scripts/train_from_scratch.py
 
-**What it does:**
-- Loads the fine-tuned model
-- Interactive prompt for joke generation
-- Manual quality assessment
+# 2. Evaluate quality
+python3 scripts/evaluate_custom_model.py
 
-**Example session:**
-```
-🤖 Loading dad joke model...
-✅ Model loaded!
+# 3. Export to ONNX
+python3 scripts/export_to_onnx.py
 
-Interactive Dad Joke Generator
-============================================================
+# 4. Copy quantized model to web directory
+cp dad-joke-model/dad_joke_model_quantized.onnx model/dad_joke_model.onnx
 
-🎤 Topic (or Enter for random): computers
-
-🎨 Generating joke...
-
-─────────────────────────────────────────────────────
-Q: Why do programmers prefer dark mode?
-A: Because light attracts bugs!
-─────────────────────────────────────────────────────
-
-🎤 Topic (or Enter for random): [Enter]
-
-🎨 Generating joke...
-
-─────────────────────────────────────────────────────
-Q: What do you call a bear with no teeth?
-A: A gummy bear!
-─────────────────────────────────────────────────────
+# 5. Test in browser
+python3 -m http.server 8000
+# Visit http://localhost:8000 and select AI mode
 ```
 
 ---
 
-### 5. `evaluate_model.py`
+## Training Data
 
-**Purpose:** Quantitative evaluation of model quality
+Located in `training_data/`:
 
-**Usage:**
-```bash
-# Evaluate with 100 samples (default)
-python3 scripts/evaluate_model.py
+| File | Description |
+|------|-------------|
+| `all_jokes.jsonl` | 4,566 unique dad jokes |
+| `dad_jokes_train.jsonl` | Training split (90%, 4,109 jokes) |
+| `dad_jokes_validation.jsonl` | Validation split (10%, 457 jokes) |
+| `batch_*.json` | Raw generated batches |
+| `validated_batch_*.jsonl` | Validated batches in JSONL format |
 
-# Evaluate with custom parameters
-python3 scripts/evaluate_model.py ./dad-joke-model/final 200 0.7 results.json
-```
-
-**Arguments:**
-1. Model path (default: `./dad-joke-model/final`)
-2. Number of samples (default: 100)
-3. Temperature (default: 0.7)
-4. Output file (optional)
-
-**What it does:**
-1. Generates N jokes with the model
-2. Validates each joke with JokeValidator
-3. Calculates pass rate
-4. Shows sample outputs and failure analysis
-
-**Example output:**
-```
-📊 EVALUATION RESULTS
-============================================================
-Total jokes generated: 100
-✅ Passed validation: 96 (96.0%)
-❌ Failed validation: 4 (4.0%)
-
-📋 Failure Breakdown:
-  - Missing wordplay setup: 2 (50.0% of failures)
-  - Invalid length: 1 (25.0% of failures)
-  - Missing Q&A format: 1 (25.0% of failures)
-
-✅ Sample VALID jokes:
-============================================================
-1. Q: Why don't scientists trust atoms?
-   A: Because they make up everything!
-
-2. Q: What do you call a factory that sells good products?
-   A: A satisfactory!
-
-📈 QUALITY ASSESSMENT
-============================================================
-🎉 EXCELLENT! Model quality is production-ready.
-   ✓ Pass rate exceeds 95% threshold
-   ✓ Ready for deployment to Hugging Face
-```
-
-**Success criteria:**
-- **≥95%:** Excellent, ready for deployment
-- **85-94%:** Good, acceptable quality
-- **<85%:** Insufficient, needs more training
+**Format:** Each line is `{"text": "Q: Why...? A: Because...!"}`
 
 ---
 
-### 6. `prepare_for_webllm.py`
+## Troubleshooting
 
-**Purpose:** Guide for converting model to WebLLM format
+**MPS not available:** Reinstall PyTorch: `pip install torch torchvision torchaudio`
 
-**Usage:**
-```bash
-python3 scripts/prepare_for_webllm.py
-```
+**Out of memory:** Reduce `BATCH_SIZE` to 16 in `train_from_scratch.py`
 
-**What it does:**
-- Checks if MLC-LLM is installed
-- Shows step-by-step conversion commands
-- Creates MLC configuration
-- Provides upload instructions
+**Low pass rate (<80%):** Try more training data, more epochs, or lower learning rate
 
-**Steps shown:**
-
-1. **Convert weights to 4-bit quantization**
-2. **Compile for WebGPU**
-3. **Test locally**
-4. **Upload to Hugging Face**
-5. **Integration instructions**
-
-**Note:** Actual conversion requires MLC-LLM tools:
-```bash
-pip install mlc-llm mlc-ai-nightly
-```
-
----
-
-## 📊 Complete Workflow
-
-### Phase 1: Data Generation (2-3 hours)
-
-```bash
-# 1. Generate first batch with Claude
-python3 scripts/generate_training_data.py
-# Copy prompt, use with Claude, save to batch_001.json
-
-# 2. Validate batch
-python3 scripts/generate_training_data.py --validate batch_001.json
-
-# 3. Repeat for ~100 batches (10,000+ jokes)
-# Generate batch_002.json, batch_003.json, etc.
-
-# 4. Combine all validated jokes
-cat training_data/validated_*.jsonl > training_data/all_jokes.jsonl
-
-# 5. Split into train/validation
-total=$(wc -l < training_data/all_jokes.jsonl)
-train_count=$((total * 9 / 10))
-head -n $train_count training_data/all_jokes.jsonl > training_data/dad_jokes_train.jsonl
-tail -n +$((train_count + 1)) training_data/all_jokes.jsonl > training_data/dad_jokes_validation.jsonl
-```
-
-### Phase 2: Training (2-4 hours)
-
-```bash
-# Train the model
-python3 scripts/train_dad_joke_model.py
-
-# Expected: 2-4 hours depending on hardware
-# Output: ./dad-joke-model/final/
-```
-
-### Phase 3: Evaluation (10-15 minutes)
-
-```bash
-# Quick test (interactive)
-python3 scripts/test_model.py
-
-# Quantitative evaluation
-python3 scripts/evaluate_model.py ./dad-joke-model/final 100 0.7 evaluation_results.json
-
-# Check pass rate - should be ≥95%
-```
-
-### Phase 4: WebLLM Conversion (30 minutes)
-
-```bash
-# Install MLC-LLM
-pip install mlc-llm mlc-ai-nightly
-
-# Run conversion guide
-python3 scripts/prepare_for_webllm.py
-
-# Follow the displayed steps to convert and test
-```
-
-### Phase 5: Deployment (15 minutes)
-
-```bash
-# Login to Hugging Face
-huggingface-cli login
-
-# Create repository
-huggingface-cli repo create dad-joke-tinyllama-webllm --type model
-
-# Upload model
-cd dad-joke-model-webllm
-huggingface-cli upload YOUR_USERNAME/dad-joke-tinyllama-webllm . --repo-type model
-```
-
-### Phase 6: Integration (30 minutes)
-
-Update `index.html`:
-```javascript
-// Change model ID to your custom model
-const MODEL_ID = "YOUR_USERNAME/dad-joke-tinyllama-webllm-q4f16_1-MLC";
-```
-
-Test on GitHub Pages and verify quality!
-
----
-
-## 🐛 Troubleshooting
-
-### Issue: "MPS not available"
-
-**Solution:**
-```bash
-# Check PyTorch installation
-python3 -c "import torch; print(torch.__version__)"
-
-# Reinstall PyTorch with MPS support
-pip3 uninstall torch
-pip3 install torch torchvision torchaudio
-```
-
-### Issue: "Out of memory during training"
-
-**Solution:** Reduce batch size in `train_dad_joke_model.py`:
-```python
-BATCH_SIZE = 2  # Instead of 4
-GRADIENT_ACCUMULATION = 8  # Instead of 4
-```
-
-### Issue: "Low validation pass rate (<85%)"
-
-**Possible causes:**
-1. Insufficient training data → Generate more jokes
-2. Too few epochs → Increase to 5 epochs
-3. Poor quality training data → Review rejected samples
-4. Need better prompts → Refine Claude generation prompts
-
-**Solution:**
-```bash
-# Review rejected jokes for patterns
-python3 -c "
-import json
-with open('training_data/rejected.jsonl') as f:
-    for line in f:
-        print(json.loads(line))
-"
-
-# Train for more epochs
-# Edit train_dad_joke_model.py: EPOCHS = 5
-python3 scripts/train_dad_joke_model.py
-```
-
-### Issue: "Model generates gibberish"
-
-**Possible causes:**
-1. Training diverged → Use lower learning rate
-2. Overfitting → Use more training data
-3. Wrong model format → Check tokenizer
-
-**Solution:**
-```python
-# In train_dad_joke_model.py, reduce learning rate:
-LEARNING_RATE = 1e-4  # Instead of 2e-4
-```
-
----
-
-## 📚 Additional Resources
-
-- [TinyLlama Model Card](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0)
-- [PEFT Documentation](https://huggingface.co/docs/peft)
-- [Transformers Training](https://huggingface.co/docs/transformers/training)
-- [MLC-LLM Docs](https://llm.mlc.ai/docs/)
-- [WebLLM GitHub](https://github.com/mlc-ai/web-llm)
-
----
-
-## ❓ FAQ
-
-**Q: How long does the entire process take?**
-A: 8-12 hours total (2-3 hours data generation, 2-4 hours training, 1-2 hours conversion, rest is setup/testing)
-
-**Q: Can I train on Linux or Windows?**
-A: Yes! The scripts work on any platform with Python 3.10+. GPU acceleration varies (CUDA on Linux/Windows, MPS on macOS)
-
-**Q: How much does this cost?**
-A: $0 if using Mac mini locally + Hugging Face free tier. All tools are free and open source.
-
-**Q: What if I don't have a Mac?**
-A: Any computer with 8GB+ RAM works. Intel Macs use CPU (slower). Linux/Windows can use CUDA GPU if available.
-
-**Q: Can I use a different base model?**
-A: Yes! Edit `MODEL_NAME` in `train_dad_joke_model.py`. Other options: Llama-3.2-1B, Phi-3.5-mini, etc.
-
-**Q: How do I improve quality beyond 95%?**
-A: More training data (50K+ jokes), train longer (5+ epochs), manual review and filtering, hyperparameter tuning
-
----
-
-**Last Updated:** 2025-11-20
-**Maintainer:** Daniel (@Daniel085)
+**ONNX export fails:** Ensure `onnx` and `onnxruntime` are installed: `pip install onnx onnxruntime`
