@@ -46,3 +46,9 @@ wandb/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Built model artifacts (tracked via release, not git)
+model/*.onnx
+
+# Claude Code local config
+.claude/launch.json
