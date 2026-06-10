@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dad's Workshop - Premium Dad Joke Generator</title>
+    <title>Dad's Workshop - Premium Dad Joke Generator (AI-Powered)</title>
     <style>
         * {
             margin: 0;
@@ -296,6 +296,128 @@
         .screw-tr { top: 15px; right: 15px; }
         .screw-bl { bottom: 15px; left: 15px; }
         .screw-br { bottom: 15px; right: 15px; }
+
+        /* AI-specific styles */
+        .source-btn.ai-btn {
+            background: rgba(138, 43, 226, 0.2);
+            border-color: #9370DB;
+            color: #DA70D6;
+        }
+
+        .source-btn.ai-btn:hover {
+            background: rgba(138, 43, 226, 0.3);
+        }
+
+        .source-btn.ai-btn.active {
+            background: linear-gradient(145deg, #9370DB 0%, #DA70D6 100%);
+            color: #2C2C2C;
+        }
+
+        .source-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* Progress bar */
+        .progress-container {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 3px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 20px;
+            background: linear-gradient(90deg, #9370DB 0%, #DA70D6 100%);
+            border-radius: 7px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.7em;
+            font-weight: bold;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #DA70D6;
+            font-size: 0.9em;
+            margin-top: 5px;
+            min-height: 20px;
+        }
+
+        /* AI Info box */
+        .ai-info {
+            display: none;
+            background: rgba(147, 112, 219, 0.1);
+            border: 2px solid #9370DB;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .ai-info h3 {
+            color: #DA70D6;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .ai-info p {
+            color: #F5F5DC;
+            font-size: 0.9em;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+
+        .ai-info ul {
+            color: #F5F5DC;
+            font-size: 0.85em;
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+
+        .ai-info-btn {
+            padding: 10px 20px;
+            background: linear-gradient(145deg, #9370DB 0%, #DA70D6 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .ai-info-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(147, 112, 219, 0.4);
+        }
+
+        .ai-info-btn.secondary {
+            background: rgba(255, 215, 0, 0.3);
+            border: 2px solid #FFD700;
+            color: #FFD700;
+        }
+
+        /* Debug stats (optional) */
+        .debug-stats {
+            display: none;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid #666;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 0.75em;
+            color: #CCC;
+        }
+
+        .debug-stats.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -315,9 +437,39 @@
             <button class="source-btn active" data-source="local" onclick="switchSource('local')">
                 📦 Local Vault
             </button>
+            <button class="source-btn ai-btn" data-source="ai" onclick="switchSource('ai')">
+                🤖 AI Generated
+            </button>
+        </div>
+
+        <!-- AI Info Box (shown on first use) -->
+        <div class="ai-info" id="aiInfo">
+            <h3>🤖 AI Dad Joke Generator</h3>
+            <p>Generate unlimited unique dad jokes using a custom-trained AI model!</p>
+            <p><strong>First-time setup:</strong></p>
+            <ul>
+                <li>Custom model trained on 4,500+ curated dad jokes</li>
+                <li>Small download (~50-80MB, cached for future use)</li>
+                <li>Works on any modern browser (desktop &amp; mobile)</li>
+                <li>Takes a few seconds to initialize</li>
+            </ul>
+            <p>Generates jokes in under 2 seconds each!</p>
+            <div>
+                <button class="ai-info-btn" onclick="initializeAI()">Initialize AI Mode</button>
+                <button class="ai-info-btn secondary" onclick="cancelAIInit()">Use Local Vault</button>
+            </div>
+        </div>
+
+        <!-- Progress Bar for AI Loading -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+            <div class="progress-text" id="progressText">Initializing...</div>
         </div>
 
         <div class="stats" id="stats"></div>
+
+        <!-- Debug Stats (hidden by default, add ?debug=true to URL) -->
+        <div class="debug-stats" id="debugStats"></div>
 
         <div class="joke-display">
             <div class="joke-text" id="jokeText">
@@ -340,15 +492,36 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        // Import ONNX Runtime Web for model inference
+        import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.mjs";
+        // Import Transformers.js for GPT-2 tokenizer
+        import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+
         // Configuration
         const API_URL = 'https://icanhazdadjoke.com/';
         const LOCAL_JOKES_FILE = 'jokes.json';
+        const MODEL_PATH = './dad-joke-model/dad_joke_model_quantized.onnx';
 
         // State management
         let jokeSource = localStorage.getItem('jokeSource') || 'local';
         let localJokes = [];
         let seenJokes = new Set(JSON.parse(sessionStorage.getItem('seenJokes') || '[]'));
+
+        // AI state
+        let aiSession = null;       // ONNX inference session
+        let aiTokenizer = null;     // GPT-2 tokenizer
+        let aiInitialized = false;
+        let aiStats = {
+            generated: 0,
+            accepted: 0,
+            rejected: 0,
+            fallbackCount: 0,
+            totalGenerationTime: 0
+        };
+
+        // Debug mode
+        const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === 'true';
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -362,10 +535,278 @@
                 console.error('Failed to load local jokes:', error);
             }
 
+            // AI mode is available on all modern browsers (uses WebAssembly)
+            // No WebGPU or desktop-only restriction needed
+
+            // Show debug stats if in debug mode
+            if (DEBUG_MODE) {
+                document.getElementById('debugStats').classList.add('show');
+            }
+
             // Set active source button
             updateSourceButtons();
             updateStats();
         });
+
+        // ==============================================
+        // JOKE VALIDATOR CLASS
+        // ==============================================
+
+        class JokeValidator {
+            constructor() {
+                this.profanityList = ['damn', 'hell', 'crap', 'shit', 'fuck', 'ass', 'bitch'];
+            }
+
+            validate(joke) {
+                const checks = {
+                    hasQuestion: /\?/.test(joke),
+                    hasFormat: /Q:|A:/i.test(joke) || joke.split('?').length === 2,
+                    isShort: joke.length >= 20 && joke.length <= 200,
+                    isClean: !this.containsProfanity(joke),
+                    hasPun: this.detectWordplay(joke),
+                    noMeta: !/(here's|I made|joke about|example)/i.test(joke)
+                };
+
+                const passed = Object.values(checks).every(check => check === true);
+
+                if (DEBUG_MODE) {
+                    console.log('[Validator]', checks, '→', passed);
+                }
+
+                return passed;
+            }
+
+            containsProfanity(joke) {
+                return this.profanityList.some(word =>
+                    new RegExp(`\\b${word}\\b`, 'i').test(joke)
+                );
+            }
+
+            detectWordplay(joke) {
+                const patterns = [
+                    /\b(\w+)\b.*\b\1\b/i,
+                    /\b(to|too|two|see|sea|right|write|hear|here)\b/i
+                ];
+                return patterns.some(p => p.test(joke));
+            }
+        }
+
+        const validator = new JokeValidator();
+
+        // ==============================================
+        // AI FUNCTIONS (Custom ONNX Model)
+        // ==============================================
+
+        function cleanAIJoke(raw) {
+            let cleaned = raw
+                .replace(/^(Here's|I made|How about).*/im, '')
+                .replace(/^["']|["']$/g, '')
+                .trim();
+
+            // Remove anything after a second "Q:" (model sometimes generates multiple jokes)
+            const secondQ = cleaned.indexOf('Q:', 3);
+            if (secondQ > 0) {
+                cleaned = cleaned.substring(0, secondQ).trim();
+            }
+
+            // Truncate the answer at the first sentence-ending punctuation.
+            // Dad jokes are one-liners: Q: ... ? A: ...!  — anything past the
+            // first !/./? on the answer side is usually hallucinated filler.
+            const answerMatch = cleaned.match(/^(Q:[\s\S]*?A:\s*[^!?.]*[!?.])/);
+            if (answerMatch) {
+                cleaned = answerMatch[1].trim();
+            }
+
+            // Collapse runs of repeated punctuation (!!!!!! → !)
+            cleaned = cleaned.replace(/([!?.])\1{1,}/g, '$1');
+
+            return cleaned;
+        }
+
+        function sampleFromLogits(logits, temperature, topK) {
+            // Apply temperature
+            const scaled = logits.map(v => v / temperature);
+
+            // Top-k filtering
+            const indexed = scaled.map((v, i) => [v, i]);
+            indexed.sort((a, b) => b[0] - a[0]);
+            const topKItems = indexed.slice(0, topK);
+
+            // Softmax over top-k
+            const maxVal = topKItems[0][0];
+            const exps = topKItems.map(([v, i]) => [Math.exp(v - maxVal), i]);
+            const sumExp = exps.reduce((s, [e]) => s + e, 0);
+            const probs = exps.map(([e, i]) => [e / sumExp, i]);
+
+            // Sample
+            let r = Math.random();
+            for (const [p, i] of probs) {
+                r -= p;
+                if (r <= 0) return i;
+            }
+            return probs[probs.length - 1][1];
+        }
+
+        async function generateWithONNX(temperature) {
+            // Start with "Q:" prompt
+            const promptIds = aiTokenizer.encode("Q:");
+            let inputIds = [...promptIds];
+            const maxNewTokens = 80;
+            const eosTokenId = aiTokenizer.model.eos_token_id;
+            const topK = 50;
+            const vocabSize = 50257;
+
+            for (let i = 0; i < maxNewTokens; i++) {
+                // Create input tensor
+                const inputTensor = new ort.Tensor('int64',
+                    BigInt64Array.from(inputIds.map(id => BigInt(id))),
+                    [1, inputIds.length]
+                );
+
+                // Run inference
+                const output = await aiSession.run({ input_ids: inputTensor });
+                const logits = output.logits.data;
+
+                // Get logits for last token position
+                const lastPos = inputIds.length - 1;
+                const startIdx = lastPos * vocabSize;
+                const lastLogits = Array.from(logits.slice(startIdx, startIdx + vocabSize));
+
+                // Sample next token
+                const nextToken = sampleFromLogits(lastLogits, temperature, topK);
+
+                // Stop at EOS
+                if (nextToken === eosTokenId) break;
+
+                inputIds.push(nextToken);
+            }
+
+            // Decode
+            const text = aiTokenizer.decode(inputIds, { skip_special_tokens: true });
+            return text.trim();
+        }
+
+        async function generateWithAI() {
+            if (!aiInitialized) {
+                throw new Error('AI not initialized');
+            }
+
+            const MAX_ATTEMPTS = 3;
+            const startTime = Date.now();
+
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+                const temp = 0.8 + (attempt * 0.1);
+
+                if (DEBUG_MODE) {
+                    console.log('[AI] Attempt ' + (attempt + 1) + ', temp=' + temp);
+                }
+
+                const raw = await generateWithONNX(temp);
+                const joke = cleanAIJoke(raw);
+
+                aiStats.generated++;
+
+                if (validator.validate(joke)) {
+                    aiStats.accepted++;
+                    aiStats.totalGenerationTime += Date.now() - startTime;
+
+                    if (DEBUG_MODE) {
+                        console.log('[AI] Accepted:', joke);
+                        updateDebugStats();
+                    }
+
+                    return {
+                        id: 'ai_' + Date.now(),
+                        joke: joke
+                    };
+                }
+
+                aiStats.rejected++;
+                if (DEBUG_MODE) console.log('[AI] Rejected:', joke);
+            }
+
+            // All attempts failed — fallback
+            aiStats.fallbackCount++;
+            if (DEBUG_MODE) console.warn('[AI] Fallback to local');
+            return null;
+        }
+
+        async function initializeAI() {
+            const aiInfo = document.getElementById('aiInfo');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            try {
+                aiInfo.style.display = 'none';
+                progressContainer.style.display = 'block';
+
+                // Step 1: Load tokenizer
+                progressText.textContent = 'Loading tokenizer...';
+                progressBar.style.width = '20%';
+                progressBar.textContent = '20%';
+                aiTokenizer = await AutoTokenizer.from_pretrained('Xenova/gpt2');
+
+                // Step 2: Load ONNX model
+                progressText.textContent = 'Loading custom dad joke model...';
+                progressBar.style.width = '50%';
+                progressBar.textContent = '50%';
+
+                aiSession = await ort.InferenceSession.create(MODEL_PATH, {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
+                });
+
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                progressText.textContent = 'Ready!';
+
+                aiInitialized = true;
+
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                }, 500);
+
+                console.log('[AI] Custom model initialized!');
+
+                document.getElementById('jokeText').textContent = 'AI Mode Ready! Click BUILD A JOKE to generate.';
+
+            } catch (error) {
+                console.error('[AI] Init failed:', error);
+                progressContainer.style.display = 'none';
+                alert('AI initialization failed: ' + error.message + '\n\nSwitching to Local Vault.');
+                switchSource('local');
+            }
+        }
+
+        function cancelAIInit() {
+            document.getElementById('aiInfo').style.display = 'none';
+            switchSource('local');
+        }
+
+        function updateDebugStats() {
+            if (!DEBUG_MODE) return;
+
+            const avgTime = aiStats.accepted > 0
+                ? (aiStats.totalGenerationTime / aiStats.accepted / 1000).toFixed(2)
+                : 0;
+            const acceptRate = aiStats.generated > 0
+                ? ((aiStats.accepted / aiStats.generated) * 100).toFixed(1)
+                : 0;
+
+            document.getElementById('debugStats').innerHTML = `
+                <strong>AI Debug Stats:</strong><br>
+                Generated: ${aiStats.generated} |
+                Accepted: ${aiStats.accepted} (${acceptRate}%) |
+                Rejected: ${aiStats.rejected} |
+                Fallback: ${aiStats.fallbackCount} |
+                Avg Time: ${avgTime}s
+            `;
+        }
+
+        // Make functions global for onclick handlers
+        window.initializeAI = initializeAI;
+        window.cancelAIInit = cancelAIInit;
 
         // Switch joke source
         function switchSource(source) {
@@ -373,6 +814,13 @@
             localStorage.setItem('jokeSource', source);
             updateSourceButtons();
             updateStats();
+
+            // Show AI info if switching to AI and not initialized
+            if (source === 'ai' && !aiInitialized) {
+                document.getElementById('aiInfo').style.display = 'block';
+            } else {
+                document.getElementById('aiInfo').style.display = 'none';
+            }
         }
 
         // Update source button states
@@ -389,9 +837,21 @@
         // Update statistics display
         function updateStats() {
             const statsEl = document.getElementById('stats');
-            const total = jokeSource === 'api' ? '1000+' : localJokes.length;
+            let sourceName, total;
+
+            if (jokeSource === 'api') {
+                sourceName = 'Live API';
+                total = '1000+';
+            } else if (jokeSource === 'local') {
+                sourceName = 'Local Vault';
+                total = localJokes.length;
+            } else if (jokeSource === 'ai') {
+                sourceName = aiInitialized ? 'AI Generated' : 'AI (Not Initialized)';
+                total = '∞';
+            }
+
             const seen = seenJokes.size;
-            statsEl.textContent = `Source: ${jokeSource === 'api' ? 'Live API' : 'Local Vault'} | Seen this session: ${seen} jokes`;
+            statsEl.textContent = `Source: ${sourceName} | Total: ${total} | Seen: ${seen} jokes`;
         }
 
         // Get joke from API
@@ -457,6 +917,7 @@
             // Show loading state
             jokeTextEl.style.display = 'none';
             loadingEl.style.display = 'block';
+            loadingEl.textContent = jokeSource === 'ai' ? '🤖 AI crafting joke... 🎨' : '🔧 Crafting joke... 🔨';
             buttonEl.disabled = true;
 
             try {
@@ -476,8 +937,27 @@
                         console.warn('API failed, falling back to local jokes:', error);
                         jokeData = getJokeFromLocal();
                     }
-                } else {
+                } else if (jokeSource === 'local') {
                     jokeData = getJokeFromLocal();
+                } else if (jokeSource === 'ai') {
+                    if (!aiInitialized) {
+                        throw new Error('AI not initialized. Please initialize AI mode first.');
+                    }
+
+                    try {
+                        jokeData = await generateWithAI();
+
+                        // If AI failed all attempts, fallback to local
+                        if (!jokeData) {
+                            console.warn('[AI] All attempts failed, using local fallback');
+                            jokeData = getJokeFromLocal();
+                            jokeData.id = `ai_fallback_${jokeData.id}`;
+                        }
+                    } catch (error) {
+                        console.error('[AI] Generation error:', error);
+                        jokeData = getJokeFromLocal();
+                        jokeData.id = `ai_error_${jokeData.id}`;
+                    }
                 }
 
                 // Mark joke as seen
@@ -488,9 +968,13 @@
                 jokeTextEl.textContent = jokeData.joke;
                 updateStats();
 
+                if (DEBUG_MODE) {
+                    updateDebugStats();
+                }
+
             } catch (error) {
                 console.error('Error fetching joke:', error);
-                jokeTextEl.innerHTML = `<span class="error">Oops! The workshop ran out of materials.<br>Try again or switch to ${jokeSource === 'api' ? 'Local Vault' : 'Live API'}.</span>`;
+                jokeTextEl.innerHTML = `<span class="error">Oops! The workshop ran out of materials.<br>${error.message}<br>Try again or switch source.</span>`;
             } finally {
                 // Hide loading state
                 loadingEl.style.display = 'none';
@@ -526,6 +1010,11 @@
                 }
             }
         });
+
+        // Make functions global for onclick handlers
+        window.switchSource = switchSource;
+        window.getJoke = getJoke;
+        window.resetSession = resetSession;
     </script>
 </body>
 </html>

@@ -1,0 +1,16 @@
+# Dad Joke Custom Transformer - Training Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core ML Framework
+torch>=2.1.0
+transformers>=4.36.0    # For GPT-2 tokenizer only
+
+# Data handling
+tqdm>=4.65.0
+
+# ONNX export and inference
+onnx>=1.15.0
+onnxruntime>=1.17.0
+
+# Utilities
+numpy>=1.24.0
