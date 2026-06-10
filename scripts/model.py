@@ -21,12 +21,12 @@ import math
 class DadJokeConfig:
     """Model configuration"""
     vocab_size = 50257       # GPT-2 tokenizer vocab size
-    n_layers = 6             # Number of transformer blocks
+    n_layers = 8             # Number of transformer blocks
     n_heads = 8              # Number of attention heads
     d_model = 512            # Embedding dimension
     d_ff = 2048              # Feed-forward hidden dimension (4x d_model)
     max_seq_len = 128        # Maximum sequence length
-    dropout = 0.1            # Dropout rate
+    dropout = 0.15           # Dropout rate
 
     def to_dict(self):
         return {k: v for k, v in self.__class__.__dict__.items()

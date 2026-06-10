@@ -13,6 +13,7 @@ Expects training data in:
 
 import os
 import json
+import math
 import time
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -28,12 +29,13 @@ TRAINING_DATA = "training_data/dad_jokes_train.jsonl"
 VALIDATION_DATA = "training_data/dad_jokes_validation.jsonl"
 OUTPUT_DIR = "dad-joke-model"
 
-EPOCHS = 20
+EPOCHS = 40
 BATCH_SIZE = 32
 LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 0.01
 GRAD_CLIP = 1.0
-PATIENCE = 5          # Early stopping patience (epochs)
+PATIENCE = 10         # Early stopping patience (epochs)
+WARMUP_STEPS = 200    # Linear warmup steps
 LOG_EVERY = 50        # Log training loss every N steps
 
 
@@ -84,32 +86,45 @@ class DadJokeDataset(Dataset):
 
     def __getitem__(self, idx):
         text = self.examples[idx]
+        eos_id = self.tokenizer.eos_token_id
 
         # Tokenize: add EOS token so model learns when to stop
-        encoded = self.tokenizer.encode(text + self.tokenizer.eos_token)
+        # Format: [tokens..., EOS]
+        encoded = self.tokenizer.encode(text) + [eos_id]
 
-        # Truncate if too long
+        # Truncate if too long (keep EOS at the end)
         if len(encoded) > self.max_len:
-            encoded = encoded[:self.max_len]
+            encoded = encoded[:self.max_len - 1] + [eos_id]
 
-        # Pad if too short
-        padding_len = self.max_len - len(encoded)
-        input_ids = encoded + [self.tokenizer.pad_token_id] * padding_len
+        seq_len = self.max_len - 1  # for the shifted target
 
-        # Targets: same as input shifted by 1 (handled by cross-entropy)
-        # Use -100 for padding so loss ignores it
-        targets = encoded[1:] + [-100] * (padding_len + 1)
-        # Also mask the padding in input
-        input_ids_tensor = torch.tensor(input_ids[:-1], dtype=torch.long)
-        targets_tensor = torch.tensor(targets[:self.max_len - 1], dtype=torch.long)
+        # Build input and target
+        # input:  [encoded[:-1]]          padded with EOS
+        # target: [encoded[1:]]           padded with -100 (ignored by loss)
+        #
+        # Critical: target IS trained at the position predicting EOS,
+        # so the model learns to emit EOS after the last content token.
+        input_ids = encoded[:-1]              # all but the last token
+        targets = encoded[1:]                 # shifted by 1; includes the final EOS
 
-        # Ensure same length
-        if len(input_ids_tensor) < self.max_len - 1:
-            pad = self.max_len - 1 - len(input_ids_tensor)
-            input_ids_tensor = torch.cat([input_ids_tensor, torch.full((pad,), self.tokenizer.pad_token_id)])
-            targets_tensor = torch.cat([targets_tensor, torch.full((pad,), -100)])
+        # Pad input with EOS (any token works since target is -100 there)
+        pad_len_input = seq_len - len(input_ids)
+        if pad_len_input > 0:
+            input_ids = input_ids + [eos_id] * pad_len_input
 
-        return input_ids_tensor, targets_tensor
+        # Pad target with -100 so padding positions contribute NO loss
+        pad_len_target = seq_len - len(targets)
+        if pad_len_target > 0:
+            targets = targets + [-100] * pad_len_target
+
+        # Truncate to seq_len (in case encoded was exactly max_len)
+        input_ids = input_ids[:seq_len]
+        targets = targets[:seq_len]
+
+        return (
+            torch.tensor(input_ids, dtype=torch.long),
+            torch.tensor(targets, dtype=torch.long),
+        )
 
 
 # ─── Training ────────────────────────────────────────────────────────────────
@@ -174,10 +189,18 @@ def train():
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
 
-    # Optimizer and scheduler
+    # Optimizer and scheduler (linear warmup + cosine decay)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     total_steps = len(train_loader) * EPOCHS
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+
+    def lr_lambda(step):
+        if step < WARMUP_STEPS:
+            return step / max(1, WARMUP_STEPS)
+        # Cosine decay from 1.0 to 0.1 after warmup
+        progress = (step - WARMUP_STEPS) / max(1, total_steps - WARMUP_STEPS)
+        return 0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     # Training state
     best_val_loss = float('inf')
@@ -223,17 +246,17 @@ def train():
                 avg = epoch_loss / n_batches
                 lr = scheduler.get_last_lr()[0]
                 elapsed = time.time() - start_time
-                print(f"  Step {global_step}/{total_steps} | Loss: {avg:.4f} | LR: {lr:.6f} | Time: {elapsed:.0f}s")
+                print(f"  Step {global_step}/{total_steps} | Loss: {avg:.4f} | LR: {lr:.6f} | Time: {elapsed:.0f}s", flush=True)
 
         # Epoch complete
         avg_train_loss = epoch_loss / n_batches
         val_loss = validate(model, val_loader, device)
         elapsed = time.time() - start_time
 
-        print(f"\nEpoch {epoch + 1}/{EPOCHS}")
-        print(f"  Train loss: {avg_train_loss:.4f}")
-        print(f"  Val loss:   {val_loss:.4f}")
-        print(f"  Time:       {elapsed:.0f}s")
+        print(f"\nEpoch {epoch + 1}/{EPOCHS}", flush=True)
+        print(f"  Train loss: {avg_train_loss:.4f}", flush=True)
+        print(f"  Val loss:   {val_loss:.4f}", flush=True)
+        print(f"  Time:       {elapsed:.0f}s", flush=True)
 
         # Save best model
         if val_loss < best_val_loss:

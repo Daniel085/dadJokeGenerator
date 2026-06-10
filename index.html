@@ -609,6 +609,17 @@
                 cleaned = cleaned.substring(0, secondQ).trim();
             }
 
+            // Truncate the answer at the first sentence-ending punctuation.
+            // Dad jokes are one-liners: Q: ... ? A: ...!  — anything past the
+            // first !/./? on the answer side is usually hallucinated filler.
+            const answerMatch = cleaned.match(/^(Q:[\s\S]*?A:\s*[^!?.]*[!?.])/);
+            if (answerMatch) {
+                cleaned = answerMatch[1].trim();
+            }
+
+            // Collapse runs of repeated punctuation (!!!!!! → !)
+            cleaned = cleaned.replace(/([!?.])\1{1,}/g, '$1');
+
             return cleaned;
         }
 
