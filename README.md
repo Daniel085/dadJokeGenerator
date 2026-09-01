@@ -20,7 +20,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - **🔀 Triple Joke Sources**
   - **🌐 Live API Mode**: Fetches jokes from [icanhazdadjoke.com](https://icanhazdadjoke.com) (1000+ jokes)
   - **📦 Local Vault Mode**: Curated collection of 750+ dad jokes stored locally
-  - **🤖 AI Generated Mode**: Custom-trained 25M parameter transformer generates unique dad jokes on-device via ONNX Runtime Web (~50-80MB model, works on desktop & mobile)
+  - **🤖 AI Generated Mode**: DistilGPT-2 fine-tuned on 4,000+ dad jokes generates unique jokes on-device via ONNX Runtime Web (~115MB model, works on desktop & mobile)
   - User-selectable toggle between all three sources
   - Automatic fallback: If API or AI fails, seamlessly switches to local jokes
 
@@ -63,7 +63,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 
 **Custom-trained AI model generates dad jokes directly in your browser**
 
-- **Model**: DadJokeTransformer (~25M parameters, trained on 4,500+ curated jokes)
+- **Model**: DistilGPT-2 (82M parameters) fine-tuned on 4,100+ curated jokes — see [docs/MODEL_TRAINING.md](docs/MODEL_TRAINING.md) for why we fine-tune rather than train from scratch
 - **Technology**: ONNX Runtime Web (WebAssembly) + GPT-2 tokenizer
 - **Platform**: Any modern browser (desktop & mobile)
 - **Quality Control**: Multi-layer validation system ensures dad-joke quality
@@ -88,11 +88,11 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
   - Edge 113+ ✅
   - Safari 16+ ✅
   - Firefox 100+ ✅
-- **Mobile devices**: ✅ Supported (model is only ~50-80MB)
+- **Mobile devices**: ✅ Supported (model is ~115MB)
   - Use API or Local Vault mode on mobile instead
 
 **First-Time Setup:**
-- One-time model download (~50-80MB, cached)
+- One-time model download (~115MB, cached)
 - A few seconds to initialize
 - Subsequent page loads: instant (model cached in IndexedDB)
 
@@ -376,7 +376,7 @@ npx http-server
 - **External APIs**:
   - [icanhazdadjoke.com](https://icanhazdadjoke.com) - Free dad joke API
   - [ONNX Runtime Web CDN](https://cdn.jsdelivr.net/npm/onnxruntime-web) - ML inference runtime
-- **AI Model**: Custom DadJokeTransformer (~25M params, trained from scratch on 4,500+ jokes)
+- **AI Model**: DistilGPT-2 (82M params) fine-tuned on 4,100+ jokes, quantized to ~115MB ([training notes](docs/MODEL_TRAINING.md))
 
 ### Why No Frameworks?
 
