@@ -3,7 +3,7 @@
 
 # Core ML Framework
 torch>=2.1.0
-transformers>=4.36.0    # For GPT-2 tokenizer only
+transformers>=4.36.0    # GPT-2 tokenizer + DistilGPT-2 base model
 
 # Data handling
 tqdm>=4.65.0
@@ -11,6 +11,8 @@ tqdm>=4.65.0
 # ONNX export and inference
 onnx>=1.15.0
 onnxruntime>=1.17.0
+optimum[exporters]>=1.20.0   # HF Optimum: ONNX export for the fine-tuned GPT-2
+optimum-onnx
 
 # Utilities
 numpy>=1.24.0
