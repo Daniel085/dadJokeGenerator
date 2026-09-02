@@ -445,15 +445,15 @@
         <!-- AI Info Box (shown on first use) -->
         <div class="ai-info" id="aiInfo">
             <h3>🤖 AI Dad Joke Generator</h3>
-            <p>Generate unlimited unique dad jokes using a custom-trained AI model!</p>
+            <p>Generate brand-new dad jokes with a language model running entirely in your browser.</p>
             <p><strong>First-time setup:</strong></p>
             <ul>
-                <li>Custom model trained on 4,500+ curated dad jokes</li>
-                <li>Small download (~50-80MB, cached for future use)</li>
-                <li>Works on any modern browser (desktop &amp; mobile)</li>
-                <li>Takes a few seconds to initialize</li>
+                <li>Qwen2.5-0.5B, fine-tuned on 4,000+ curated dad jokes</li>
+                <li>One-time download (<span id="aiModelSize">~425MB</span>, cached for future visits)</li>
+                <li>Works in any modern desktop browser; on mobile, expect a slow first load</li>
+                <li>Takes 10&ndash;30 seconds to initialize</li>
             </ul>
-            <p>Generates jokes in under 2 seconds each!</p>
+            <p>A few seconds per joke. The jokes are AI-written, so some will be groaners &mdash; that's the point.</p>
             <div>
                 <button class="ai-info-btn" onclick="initializeAI()">Initialize AI Mode</button>
                 <button class="ai-info-btn secondary" onclick="cancelAIInit()">Use Local Vault</button>
@@ -494,14 +494,21 @@
 
     <script type="module">
         // Import ONNX Runtime Web for model inference
-        import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.mjs";
+        // The webgpu bundle includes both the WebGPU and wasm backends.
+        import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.webgpu.min.mjs";
+        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/";
         // Import Transformers.js for GPT-2 tokenizer
-        import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+        import { AutoTokenizer, env as tfEnv } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
         // Configuration
         const API_URL = 'https://icanhazdadjoke.com/';
         const LOCAL_JOKES_FILE = 'jokes.json';
-        const MODEL_PATH = './dad-joke-model/dad_joke_finetuned_quantized.onnx';
+        // Fine-tuned Qwen2.5-0.5B, KV-cache export, 4-bit weights. The same
+        // folder holds the tokenizer files, served locally alongside the model.
+        const MODEL_DIR = 'dad-joke-model/qwen';
+        const MODEL_PATH = './' + MODEL_DIR + '/model_q4.onnx';
+        tfEnv.allowRemoteModels = false;
+        tfEnv.localModelPath = './';
 
         // State management
         let jokeSource = localStorage.getItem('jokeSource') || 'local';
@@ -510,7 +517,8 @@
 
         // AI state
         let aiSession = null;       // ONNX inference session
-        let aiTokenizer = null;     // GPT-2 tokenizer
+        let aiTokenizer = null;     // Qwen2 tokenizer (served from MODEL_DIR)
+        let aiEosTokenId = null;    // end-of-text id, read from MODEL_DIR/config.json
         let aiInitialized = false;
         let aiStats = {
             generated: 0,
@@ -555,16 +563,62 @@
         class JokeValidator {
             constructor() {
                 this.profanityList = ['damn', 'hell', 'crap', 'shit', 'fuck', 'ass', 'bitch'];
+
+                // Words that carry no joke content; ignored when comparing Q and A
+                this.stopwords = new Set(('the a an to of in on at for with and or it its he she they was were is are ' +
+                    'did do does you your call what why who how when where because that this his her their had have ' +
+                    'has be been get got go went say said make made one some very just really so too much many ' +
+                    'about into from by as if than then there here up down out off over all any no not lot lots ' +
+                    'always never ever also only').split(' '));
+
+                // Sound-alike pairs that dad jokes lean on. A member in the answer whose
+                // partner appears in the question is strong evidence of intended wordplay.
+                this.homophones = [
+                    ['to', 'too', 'two'], ['see', 'sea', 'c'], ['right', 'write'], ['hear', 'here'],
+                    ['knight', 'night'], ['flour', 'flower'], ['whey', 'way', 'weigh'], ['bear', 'bare'],
+                    ['sole', 'soul'], ['pear', 'pair'], ['plane', 'plain'], ['son', 'sun'], ['weak', 'week'],
+                    ['wait', 'weight'], ['meat', 'meet'], ['peace', 'piece'], ['tail', 'tale'], ['steel', 'steal'],
+                    ['heel', 'heal'], ['deer', 'dear'], ['hare', 'hair'], ['knead', 'need'], ['mail', 'male'],
+                    ['brake', 'break'], ['bass', 'base'], ['thyme', 'time'], ['leek', 'leak'], ['mussel', 'muscle'],
+                    ['pane', 'pain'], ['reign', 'rain'], ['rows', 'rose'], ['chews', 'choose'], ['blew', 'blue'],
+                    ['flee', 'flea'], ['fir', 'fur'], ['sew', 'so'], ['gnu', 'new', 'knew'], ['toad', 'towed'],
+                    ['whale', 'wail'], ['boar', 'bore'], ['ewe', 'you'], ['moose', 'mousse'], ['paws', 'pause'],
+                    ['purr', 'per'], ['claws', 'clause'], ['cell', 'sell'], ['aisle', 'isle'], ['lei', 'lay'],
+                    ['pit', 'pity'], ['current', 'currant'], ['hoarse', 'horse'], ['tide', 'tied'],
+                    ['sight', 'site'], ['seam', 'seem'], ['groan', 'grown'], ['dough', 'doe'], ['bread', 'bred'],
+                    ['roll', 'role'], ['byte', 'bite'], ['chip', 'cheap'], ['juice', 'use'], ['bean', 'been'],
+                    ['sweet', 'suite'], ['berry', 'bury'], ['grate', 'great'], ['peel', 'peal'], ['thai', 'tie']
+                ];
+            }
+
+            // Split "Q: ...? A: ..." into its two halves; null if the shape is wrong.
+            split(joke) {
+                const m = joke.match(/^\s*Q:\s*([\s\S]*?\?)\s*A:\s*([\s\S]+?)\s*$/i);
+                return m ? { q: m[1].trim(), a: m[2].trim() } : null;
+            }
+
+            words(s) {
+                return s.toLowerCase().replace(/[^a-z' -]/g, ' ').split(/[\s-]+/)
+                    .map(w => w.replace(/^'|'s?$/g, ''))
+                    .filter(w => w.length > 1 && !this.stopwords.has(w));
+            }
+
+            stem(w) {
+                return w.replace(/(ing|ers|er|ies|es|s|ed|ly)$/, '');
             }
 
             validate(joke) {
+                const parts = this.split(joke);
                 const checks = {
-                    hasQuestion: /\?/.test(joke),
-                    hasFormat: /Q:|A:/i.test(joke) || joke.split('?').length === 2,
+                    hasFormat: parts !== null,
                     isShort: joke.length >= 20 && joke.length <= 200,
                     isClean: !this.containsProfanity(joke),
-                    hasPun: this.detectWordplay(joke),
-                    noMeta: !/(here's|I made|joke about|example)/i.test(joke)
+                    noMeta: !/(here's|I made|joke about|example)/i.test(joke),
+                    notDegenerate: !this.isDegenerate(joke),
+                    notTautology: parts !== null && !this.isTautology(parts)
+                    // Wordplay is deliberately NOT a gate: most real puns play on a
+                    // word associated with the setup (scarecrow -> field), which no
+                    // surface check can see. It's used only to rank candidates.
                 };
 
                 const passed = Object.values(checks).every(check => check === true);
@@ -576,18 +630,74 @@
                 return passed;
             }
 
+            // Higher is better; used to rank candidates when several are generated.
+            score(joke) {
+                const parts = this.split(joke);
+                if (!parts || this.isDegenerate(joke) || this.isTautology(parts)) return -1;
+                return this.wordplayScore(parts);
+            }
+
             containsProfanity(joke) {
                 return this.profanityList.some(word =>
                     new RegExp(`\\b${word}\\b`, 'i').test(joke)
                 );
             }
 
-            detectWordplay(joke) {
-                const patterns = [
-                    /\b(\w+)\b.*\b\1\b/i,
-                    /\b(to|too|two|see|sea|right|write|hear|here)\b/i
-                ];
-                return patterns.some(p => p.test(joke));
+            // Repetition loops and broken structure: "shine shine shine",
+            // "It wasn: It wasn: It was", stray extra "Q:"/"A:" labels.
+            isDegenerate(joke) {
+                if (/\b(\w+)(?:\W+\1\b){2,}/i.test(joke)) return true;
+                if (/\b(\w{2,}\W+\w{2,})\W+\1\b/i.test(joke)) return true;
+                if ((joke.match(/\b[QA]:/g) || []).length !== 2) return true;
+                return false;
+            }
+
+            // "What do you call a lazy duck? A lazy duck!" — every content word in
+            // the answer already appears in the question.
+            isTautology({ q, a }) {
+                // Compare on a 4-letter stem prefix so "loved"/"love" and
+                // "elevators"/"elevator" count as the same word.
+                const key = w => this.stem(w).slice(0, 4);
+                const qKeys = new Set(this.words(q).map(key));
+                const aWords = this.words(a);
+                if (aWords.length === 0) return true;
+                if (aWords.every(w => qKeys.has(key(w)))) return true;
+                // "What do you call a car that never leaves? A: A car that stays
+                // in one place!" — restating the subject plus a bland clause.
+                const restate = a.match(/^(?:an?|the)\s+([a-z]+)\s+(?:that|who|which|with)\b/i);
+                return !!(restate && qKeys.has(key(restate[1].toLowerCase())));
+            }
+
+            // Evidence that the answer plays on sound or form:
+            //  +2 a homophone of a question word appears in the answer
+            //  +1 a hyphenated coinage ("purr-fect", "frost-y") with a real-looking part
+            //  +1 an answer word shares a 4+ letter stem with a question word (but isn't it)
+            //  +1 an answer word rhymes (same last 3 letters, 5+ long) with a question word
+            wordplayScore({ q, a }) {
+                const qw = this.words(q), aw = this.words(a);
+                let score = 0;
+
+                for (const group of this.homophones) {
+                    const inQ = qw.some(w => group.includes(w));
+                    const inA = aw.some(w => group.includes(w));
+                    if (inQ && inA && !qw.some(w => aw.includes(w) && group.includes(w))) score += 2;
+                }
+
+                const coinage = a.match(/\b([a-z]{2,})-([a-z]{1,})\b/i);
+                if (coinage && (coinage[1].length >= 3 || coinage[2].length >= 3)) score += 1;
+
+                const qStems = qw.map(w => this.stem(w)).filter(s => s.length >= 4);
+                for (const w of aw) {
+                    const s = this.stem(w);
+                    if (qw.includes(w)) continue;
+                    if (qStems.some(qs => qs !== s && (s.startsWith(qs.slice(0, 4)) || qs.startsWith(s.slice(0, 4))) && s.length >= 4)) { score += 1; break; }
+                }
+
+                for (const w of aw) {
+                    if (w.length >= 5 && !qw.includes(w) && qw.some(x => x.length >= 5 && x !== w && x.slice(-3) === w.slice(-3))) { score += 1; break; }
+                }
+
+                return score;
             }
         }
 
@@ -624,80 +734,116 @@
         }
 
         function sampleFromLogits(logits, temperature, topK) {
-            // Apply temperature
-            const scaled = logits.map(v => v / temperature);
-
-            // Top-k filtering
-            const indexed = scaled.map((v, i) => [v, i]);
-            indexed.sort((a, b) => b[0] - a[0]);
-            const topKItems = indexed.slice(0, topK);
-
-            // Softmax over top-k
-            const maxVal = topKItems[0][0];
-            const exps = topKItems.map(([v, i]) => [Math.exp(v - maxVal), i]);
-            const sumExp = exps.reduce((s, [e]) => s + e, 0);
-            const probs = exps.map(([e, i]) => [e / sumExp, i]);
-
-            // Sample
-            let r = Math.random();
-            for (const [p, i] of probs) {
-                r -= p;
-                if (r <= 0) return i;
+            // Top-k + temperature sampling over a (possibly typed) logits
+            // array. Qwen's vocab is ~152k, so avoid sorting the whole thing:
+            // one linear pass keeps a small sorted list of the k best.
+            const topVals = [];   // descending
+            const topIdx = [];
+            for (let i = 0; i < logits.length; i++) {
+                const v = logits[i];
+                if (topVals.length === topK && v <= topVals[topK - 1]) continue;
+                let pos = topVals.length;
+                while (pos > 0 && topVals[pos - 1] < v) pos--;
+                topVals.splice(pos, 0, v);
+                topIdx.splice(pos, 0, i);
+                if (topVals.length > topK) { topVals.pop(); topIdx.pop(); }
             }
-            return probs[probs.length - 1][1];
+
+            // Softmax over the top-k with temperature
+            const maxVal = topVals[0] / temperature;
+            let sumExp = 0;
+            const exps = topVals.map(v => { const e = Math.exp(v / temperature - maxVal); sumExp += e; return e; });
+
+            let r = Math.random() * sumExp;
+            for (let k = 0; k < exps.length; k++) {
+                r -= exps[k];
+                if (r <= 0) return topIdx[k];
+            }
+            return topIdx[exps.length - 1];
         }
 
-        async function generateWithONNX(temperature) {
-            // Start with "Q:" prompt
+        // Shape of the KV cache, read once from the session's input metadata:
+        // past_key_values.N.key is [batch, kv_heads, past_len, head_dim].
+        let kvLayout = null;
+        function getKvLayout() {
+            if (kvLayout) return kvLayout;
+            const names = aiSession.inputNames.filter(n => n.startsWith('past_key_values'));
+            const meta = aiSession.inputMetadata
+                ? aiSession.inputMetadata[aiSession.inputNames.indexOf(names[0])]
+                : null;
+            // Qwen2.5-0.5B: 24 layers, 2 KV heads, head_dim 64. Read from
+            // metadata when the runtime exposes it, else fall back to these.
+            const dims = meta && meta.dimensions ? meta.dimensions : [1, 2, 0, 64];
+            kvLayout = { names, kvHeads: dims[1], headDim: dims[3] };
+            return kvLayout;
+        }
+
+        function emptyPast() {
+            const { names, kvHeads, headDim } = getKvLayout();
+            const past = {};
+            for (const n of names) {
+                past[n] = new ort.Tensor('float32', new Float32Array(0), [1, kvHeads, 0, headDim]);
+            }
+            return past;
+        }
+
+        function int64Tensor(values, dims) {
+            return new ort.Tensor('int64', BigInt64Array.from(values, v => BigInt(v)), dims);
+        }
+
+        async function generateWithONNX(temperature, maxNewTokens = 48) {
+            // Autoregressive decode with a KV cache: the prompt is processed
+            // once (prefill), then each new token is a single-position forward
+            // pass that reuses the cached keys/values from the previous step.
+            // Jokes are ~25-35 tokens; EOS usually ends them before the cap.
             const promptIds = aiTokenizer.encode("Q:");
-            let inputIds = [...promptIds];
-            const maxNewTokens = 80;
-            const eosTokenId = aiTokenizer.model.eos_token_id;
+            const generated = [...promptIds];
+            const eosTokenId = aiEosTokenId;
             const topK = 50;
-            const vocabSize = 50257;
+
+            let past = emptyPast();
+            let stepIds = promptIds;              // tokens fed this step
+            let pastLen = 0;                      // tokens already in the cache
 
             for (let i = 0; i < maxNewTokens; i++) {
-                // Create input tensors. The fine-tuned DistilGPT-2 export
-                // also requires attention_mask (all ones, no padding here)
-                // and position_ids (0..n-1).
-                const n = inputIds.length;
-                const inputTensor = new ort.Tensor('int64',
-                    BigInt64Array.from(inputIds.map(id => BigInt(id))),
-                    [1, n]
-                );
-                const attentionMask = new ort.Tensor('int64',
-                    BigInt64Array.from({ length: n }, () => 1n),
-                    [1, n]
-                );
-                const positionIds = new ort.Tensor('int64',
-                    BigInt64Array.from({ length: n }, (_, idx) => BigInt(idx)),
-                    [1, n]
-                );
+                const n = stepIds.length;
+                const feeds = {
+                    input_ids: int64Tensor(stepIds, [1, n]),
+                    attention_mask: int64Tensor(new Array(pastLen + n).fill(1), [1, pastLen + n]),
+                    position_ids: int64Tensor(Array.from({ length: n }, (_, k) => pastLen + k), [1, n]),
+                    ...past
+                };
 
-                // Run inference
-                const output = await aiSession.run({
-                    input_ids: inputTensor,
-                    attention_mask: attentionMask,
-                    position_ids: positionIds
-                });
-                const logits = output.logits.data;
+                const output = await aiSession.run(feeds);
 
-                // Get logits for last token position
-                const lastPos = inputIds.length - 1;
-                const startIdx = lastPos * vocabSize;
-                const lastLogits = Array.from(logits.slice(startIdx, startIdx + vocabSize));
-
-                // Sample next token
+                // logits: [1, n, vocab] -> take the last position
+                const logits = output.logits;
+                const vocabSize = logits.dims[2];
+                const lastLogits = logits.data.subarray((n - 1) * vocabSize, n * vocabSize);
                 const nextToken = sampleFromLogits(lastLogits, temperature, topK);
 
-                // Stop at EOS
-                if (nextToken === eosTokenId) break;
+                // Rotate present -> past for the next step, freeing the previous
+                // step's cache (GPU buffers are not garbage-collected).
+                const prevPast = past;
+                past = {};
+                for (const name of getKvLayout().names) {
+                    past[name] = output[name.replace('past_key_values', 'present')];
+                }
+                for (const t of Object.values(prevPast)) {
+                    if (t.location === 'gpu-buffer' && typeof t.dispose === 'function') t.dispose();
+                }
+                pastLen += n;
 
-                inputIds.push(nextToken);
+                if (nextToken === eosTokenId) break;
+                generated.push(nextToken);
+                stepIds = [nextToken];
             }
 
-            // Decode
-            const text = aiTokenizer.decode(inputIds, { skip_special_tokens: true });
+            for (const t of Object.values(past)) {
+                if (t.location === 'gpu-buffer' && typeof t.dispose === 'function') t.dispose();
+            }
+
+            const text = aiTokenizer.decode(generated, { skip_special_tokens: true });
             return text.trim();
         }
 
@@ -706,41 +852,57 @@
                 throw new Error('AI not initialized');
             }
 
-            const MAX_ATTEMPTS = 3;
+            // Best-of-N: generate up to MAX_ATTEMPTS candidates. A candidate that
+            // passes the hard checks AND shows wordplay evidence (score >= 1) is
+            // returned immediately; otherwise the best-scoring valid candidate
+            // is returned after the last attempt. Only if every candidate is
+            // broken do we fall back to the local vault.
+            // Two attempts: most good jokes score 0 on the surface wordplay
+            // check, so a third attempt rarely changes the pick and costs ~2-3 s.
+            const MAX_ATTEMPTS = 2;
             const startTime = Date.now();
+            let best = null;
 
             for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-                const temp = 0.8 + (attempt * 0.1);
+                const temp = 0.8;
 
                 if (DEBUG_MODE) {
                     console.log('[AI] Attempt ' + (attempt + 1) + ', temp=' + temp);
                 }
 
+                const t0 = performance.now();
                 const raw = await generateWithONNX(temp);
+                if (DEBUG_MODE) console.log('[AI] attempt took ' + Math.round(performance.now() - t0) + ' ms (' + aiSession.backend + ')');
                 const joke = cleanAIJoke(raw);
-
                 aiStats.generated++;
 
-                if (validator.validate(joke)) {
-                    aiStats.accepted++;
-                    aiStats.totalGenerationTime += Date.now() - startTime;
-
-                    if (DEBUG_MODE) {
-                        console.log('[AI] Accepted:', joke);
-                        updateDebugStats();
-                    }
-
-                    return {
-                        id: 'ai_' + Date.now(),
-                        joke: joke
-                    };
+                if (!validator.validate(joke)) {
+                    aiStats.rejected++;
+                    if (DEBUG_MODE) console.log('[AI] Rejected:', joke);
+                    continue;
                 }
 
-                aiStats.rejected++;
-                if (DEBUG_MODE) console.log('[AI] Rejected:', joke);
+                const score = validator.score(joke);
+                if (DEBUG_MODE) console.log('[AI] Candidate (score ' + score + '):', joke);
+
+                if (!best || score > best.score) best = { joke, score };
+                if (score >= 1) break;
             }
 
-            // All attempts failed — fallback
+            if (best) {
+                aiStats.accepted++;
+                aiStats.totalGenerationTime += Date.now() - startTime;
+                if (DEBUG_MODE) {
+                    console.log('[AI] Accepted (score ' + best.score + '):', best.joke);
+                    updateDebugStats();
+                }
+                return {
+                    id: 'ai_' + Date.now(),
+                    joke: best.joke
+                };
+            }
+
+            // Every candidate was broken — fallback
             aiStats.fallbackCount++;
             if (DEBUG_MODE) console.warn('[AI] Fallback to local');
             return null;
@@ -760,17 +922,59 @@
                 progressText.textContent = 'Loading tokenizer...';
                 progressBar.style.width = '20%';
                 progressBar.textContent = '20%';
-                aiTokenizer = await AutoTokenizer.from_pretrained('Xenova/gpt2');
+                aiTokenizer = await AutoTokenizer.from_pretrained(MODEL_DIR);
+                // The tokenizer object doesn't expose eos_token_id for Qwen2;
+                // the model config does (151643 for Qwen2.5).
+                const modelConfig = await (await fetch('./' + MODEL_DIR + '/config.json')).json();
+                aiEosTokenId = modelConfig.eos_token_id;
+                if (typeof aiEosTokenId !== 'number') throw new Error('config.json has no eos_token_id');
 
                 // Step 2: Load ONNX model
-                progressText.textContent = 'Loading custom dad joke model...';
+                progressText.textContent = 'Loading dad joke model (one-time download)...';
                 progressBar.style.width = '50%';
                 progressBar.textContent = '50%';
 
-                aiSession = await ort.InferenceSession.create(MODEL_PATH, {
-                    executionProviders: ['wasm'],
-                    graphOptimizationLevel: 'all'
-                });
+                // Prefer WebGPU when the runtime and browser support it (much
+                // faster per token); fall back to single-threaded wasm.
+                //
+                // On WebGPU, keep the KV-cache outputs (present.*) on the GPU so
+                // each decode step doesn't round-trip 48 tensors through the CPU;
+                // only the logits come back to JS.
+                const nLayers = modelConfig.num_hidden_layers;
+                const kvOnGpu = {};
+                for (let i = 0; i < nLayers; i++) {
+                    kvOnGpu['present.' + i + '.key'] = 'gpu-buffer';
+                    kvOnGpu['present.' + i + '.value'] = 'gpu-buffer';
+                }
+                let backend = 'webgpu';
+                try {
+                    ort.env.wasm.proxy = false;   // proxy mode forbids GPU-resident outputs
+                    aiSession = await ort.InferenceSession.create(MODEL_PATH, {
+                        executionProviders: ['webgpu'],
+                        graphOptimizationLevel: 'all',
+                        preferredOutputLocation: kvOnGpu
+                    });
+                } catch (e) {
+                    if (DEBUG_MODE) console.warn('[AI] WebGPU unavailable, using wasm:', e.message);
+                    backend = 'wasm';
+                    // Run wasm inference in a worker so the page doesn't freeze per token.
+                    ort.env.wasm.proxy = true;
+                    aiSession = await ort.InferenceSession.create(MODEL_PATH, {
+                        executionProviders: ['wasm'],
+                        graphOptimizationLevel: 'all'
+                    });
+                }
+                aiSession.backend = backend;
+                if (DEBUG_MODE) console.log('[AI] backend:', backend);
+
+                // Warm-up: WebGPU compiles shaders on first use (~5 s). Pay that
+                // now, behind the progress bar, instead of on the first joke.
+                progressText.textContent = 'Warming up...';
+                progressBar.style.width = '85%';
+                progressBar.textContent = '85%';
+                const tWarm = performance.now();
+                await generateWithONNX(0.8, 8);
+                if (DEBUG_MODE) console.log('[AI] warm-up took ' + Math.round(performance.now() - tWarm) + ' ms');
 
                 progressBar.style.width = '100%';
                 progressBar.textContent = '100%';
