@@ -661,7 +661,10 @@
                 const qKeys = new Set(this.words(q).map(key));
                 const aWords = this.words(a);
                 if (aWords.length === 0) return true;
-                if (aWords.every(w => qKeys.has(key(w)))) return true;
+                // A one-word answer is almost always the punchline itself, even
+                // when it derives from a question word: "tired toaster? Toasted!",
+                // "lazy cow? A graze!". Only multi-word restatements are tautologies.
+                if (aWords.length >= 2 && aWords.every(w => qKeys.has(key(w)))) return true;
                 // "What do you call a car that never leaves? A: A car that stays
                 // in one place!" — restating the subject plus a bland clause.
                 const restate = a.match(/^(?:an?|the)\s+([a-z]+)\s+(?:that|who|which|with)\b/i);
