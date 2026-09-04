@@ -448,12 +448,12 @@
             <p>Generate brand-new dad jokes with a language model running entirely in your browser.</p>
             <p><strong>First-time setup:</strong></p>
             <ul>
-                <li>Qwen2.5-0.5B, fine-tuned on 4,000+ curated dad jokes</li>
-                <li>One-time download (<span id="aiModelSize">~425MB</span>, cached for future visits)</li>
-                <li>Works in any modern desktop browser; on mobile, expect a slow first load</li>
-                <li>Takes 10&ndash;30 seconds to initialize</li>
+                <li>Qwen2.5-1.5B, fine-tuned on 2,500+ curated dad jokes</li>
+                <li>One-time download (<span id="aiModelSize">~1.1GB</span>, cached for future visits)</li>
+                <li>Needs a desktop browser with WebGPU (Chrome, Edge, or recent Safari); not recommended on mobile</li>
+                <li>Takes 20&ndash;60 seconds to initialize</li>
             </ul>
-            <p>A few seconds per joke. The jokes are AI-written, so some will be groaners &mdash; that's the point.</p>
+            <p>A couple of seconds per joke. Every joke is newly written &mdash; anything from the training set is filtered out &mdash; so some will be groaners. That's the point.</p>
             <div>
                 <button class="ai-info-btn" onclick="initializeAI()">Initialize AI Mode</button>
                 <button class="ai-info-btn secondary" onclick="cancelAIInit()">Use Local Vault</button>
@@ -505,7 +505,11 @@
         const LOCAL_JOKES_FILE = 'jokes.json';
         // Fine-tuned Qwen2.5-0.5B, KV-cache export, 4-bit weights. The same
         // folder holds the tokenizer files, served locally alongside the model.
-        const MODEL_DIR = 'dad-joke-model/qwen';
+        // ?model=<folder> overrides the default, for A/B testing exports
+        // (e.g. ?model=qwen15). Folder names only; no slashes.
+        const DEFAULT_MODEL = 'qwen15';   // Qwen2.5-1.5B, 1 epoch on judge-filtered data
+        const MODEL_DIR = 'dad-joke-model/' +
+            ((new URLSearchParams(window.location.search).get('model') || DEFAULT_MODEL).replace(/[^A-Za-z0-9_-]/g, '') || DEFAULT_MODEL);
         const MODEL_PATH = './' + MODEL_DIR + '/model_q4.onnx';
         tfEnv.allowRemoteModels = false;
         tfEnv.localModelPath = './';
@@ -519,6 +523,7 @@
         let aiSession = null;       // ONNX inference session
         let aiTokenizer = null;     // Qwen2 tokenizer (served from MODEL_DIR)
         let aiEosTokenId = null;    // end-of-text id, read from MODEL_DIR/config.json
+        let aiKvShape = null;       // {kvHeads, headDim} from config.json, for the empty KV cache
         let aiInitialized = false;
         let aiStats = {
             generated: 0,
@@ -607,15 +612,49 @@
                 return w.replace(/(ing|ers|er|ies|es|s|ed|ly)$/, '');
             }
 
+            // Hashes of every training joke and training question, from
+            // known_jokes.json (scripts/build_known_jokes.py). Larger models
+            // memorise: the 1.5B reproduced "outstanding in his field"
+            // verbatim 3 times in 30 samples. Anything the model was trained
+            // on is rejected so AI mode only ever shows new material.
+            setKnown(known) {
+                this.knownJokes = new Set(known.jokes || []);
+                this.knownQuestions = new Set(known.questions || []);
+            }
+
+            // Must match norm() / fnv1a() in scripts/build_known_jokes.py.
+            normalizeJoke(s) {
+                return s.toLowerCase().replace(/\b[qa]:/g, ' ').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+            }
+
+            fnv1a(s) {
+                let h = 0x811c9dc5;
+                for (const b of new TextEncoder().encode(s)) {
+                    h ^= b;
+                    h = Math.imul(h, 0x01000193) >>> 0;
+                }
+                return h >>> 0;
+            }
+
+            isKnown(joke) {
+                if (!this.knownJokes) return false;
+                if (this.knownJokes.has(this.fnv1a(this.normalizeJoke(joke)))) return true;
+                const parts = this.split(joke);
+                const q = parts ? parts.q : joke.split('?')[0];
+                return this.knownQuestions.has(this.fnv1a(this.normalizeJoke(q)));
+            }
+
             validate(joke) {
                 const parts = this.split(joke);
                 const checks = {
                     hasFormat: parts !== null,
                     isShort: joke.length >= 20 && joke.length <= 200,
                     isClean: !this.containsProfanity(joke),
+                    isEnglish: !/[^\x00-\x7FÀ-ɏ‘-”…]/.test(joke),   // Qwen occasionally emits CJK
                     noMeta: !/(here's|I made|joke about|example)/i.test(joke),
                     notDegenerate: !this.isDegenerate(joke),
-                    notTautology: parts !== null && !this.isTautology(parts)
+                    notTautology: parts !== null && !this.isTautology(parts),
+                    isNew: !this.isKnown(joke)
                     // Wordplay is deliberately NOT a gate: most real puns play on a
                     // word associated with the setup (scarecrow -> field), which no
                     // surface check can see. It's used only to rank candidates.
@@ -771,13 +810,9 @@
         function getKvLayout() {
             if (kvLayout) return kvLayout;
             const names = aiSession.inputNames.filter(n => n.startsWith('past_key_values'));
-            const meta = aiSession.inputMetadata
-                ? aiSession.inputMetadata[aiSession.inputNames.indexOf(names[0])]
-                : null;
-            // Qwen2.5-0.5B: 24 layers, 2 KV heads, head_dim 64. Read from
-            // metadata when the runtime exposes it, else fall back to these.
-            const dims = meta && meta.dimensions ? meta.dimensions : [1, 2, 0, 64];
-            kvLayout = { names, kvHeads: dims[1], headDim: dims[3] };
+            // Shape comes from the model config: Qwen2.5-0.5B is 2 KV heads x
+            // head_dim 64, the 1.5B is 2 x 128. aiKvShape is set at init.
+            kvLayout = { names, kvHeads: aiKvShape.kvHeads, headDim: aiKvShape.headDim };
             return kvLayout;
         }
 
@@ -926,11 +961,21 @@
                 progressBar.style.width = '20%';
                 progressBar.textContent = '20%';
                 aiTokenizer = await AutoTokenizer.from_pretrained(MODEL_DIR);
+                try {
+                    validator.setKnown(await (await fetch('./known_jokes.json')).json());
+                } catch (e) {
+                    console.warn('[AI] known_jokes.json not loaded; regurgitation filter off:', e.message);
+                }
                 // The tokenizer object doesn't expose eos_token_id for Qwen2;
                 // the model config does (151643 for Qwen2.5).
                 const modelConfig = await (await fetch('./' + MODEL_DIR + '/config.json')).json();
                 aiEosTokenId = modelConfig.eos_token_id;
                 if (typeof aiEosTokenId !== 'number') throw new Error('config.json has no eos_token_id');
+                aiKvShape = {
+                    kvHeads: modelConfig.num_key_value_heads,
+                    headDim: modelConfig.hidden_size / modelConfig.num_attention_heads
+                };
+                kvLayout = null;
 
                 // Step 2: Load ONNX model
                 progressText.textContent = 'Loading dad joke model (one-time download)...';

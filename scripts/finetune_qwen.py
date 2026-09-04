@@ -9,13 +9,18 @@ back into the base weights at the end so export sees a plain model.
 
 Usage:
     python scripts/prepare_data_v2.py     # once
-    python scripts/finetune_qwen.py
+    python scripts/finetune_qwen.py [--base Qwen/Qwen2.5-0.5B] [--data v2] [--name qwen]
+                                    [--batch 8] [--epochs 4]
+
+    e.g. the 1.5B model on the judge-filtered v3 data:
+    python scripts/finetune_qwen.py --base Qwen/Qwen2.5-1.5B --data v3 --name qwen15 --batch 4
 
 Outputs:
-    dad-joke-model/qwen_finetuned_hf/     merged model + tokenizer (for export)
-    dad-joke-model/qwen_lora_adapter/     the adapter alone (small, for reference)
+    dad-joke-model/<name>_finetuned_hf/   merged model + tokenizer (for export)
+    dad-joke-model/<name>_lora_adapter/   the adapter alone (small, for reference)
 """
 
+import argparse
 import json
 import math
 import os
@@ -26,16 +31,24 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 
-BASE_MODEL = "Qwen/Qwen2.5-0.5B"
-TRAIN = "training_data/v2_train.jsonl"
-VAL = "training_data/v2_validation.jsonl"
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--base", default="Qwen/Qwen2.5-0.5B")
+_ap.add_argument("--data", default="v2", help="training_data/<data>_train.jsonl / _validation.jsonl")
+_ap.add_argument("--name", default="qwen", help="output folder prefix under dad-joke-model/")
+_ap.add_argument("--batch", type=int, default=8)
+_ap.add_argument("--epochs", type=int, default=4)
+ARGS = _ap.parse_args()
+
+BASE_MODEL = ARGS.base
+TRAIN = f"training_data/{ARGS.data}_train.jsonl"
+VAL = f"training_data/{ARGS.data}_validation.jsonl"
 OUT_DIR = "dad-joke-model"
-MERGED_DIR = os.path.join(OUT_DIR, "qwen_finetuned_hf")
-ADAPTER_DIR = os.path.join(OUT_DIR, "qwen_lora_adapter")
+MERGED_DIR = os.path.join(OUT_DIR, f"{ARGS.name}_finetuned_hf")
+ADAPTER_DIR = os.path.join(OUT_DIR, f"{ARGS.name}_lora_adapter")
 
 MAX_LEN = 80          # jokes are ~25-40 Qwen tokens; 80 leaves headroom
-EPOCHS = 4
-BATCH_SIZE = 8
+EPOCHS = ARGS.epochs
+BATCH_SIZE = ARGS.batch
 LEARNING_RATE = 2e-4  # LoRA uses a higher LR than full fine-tuning
 WEIGHT_DECAY = 0.0
 GRAD_CLIP = 1.0
@@ -181,7 +194,7 @@ def train():
     print("=" * 70, flush=True)
     print(f"Done in {(time.time() - start) / 60:.1f} min | best val loss {best:.4f}", flush=True)
     print(f"Merged model: {MERGED_DIR}", flush=True)
-    print("Next: python scripts/export_qwen_to_onnx.py", flush=True)
+    print(f"Next: python scripts/export_qwen_to_onnx.py {MERGED_DIR} dad-joke-model/{ARGS.name}", flush=True)
     print("=" * 70, flush=True)
 
 
