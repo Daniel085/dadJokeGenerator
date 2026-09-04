@@ -505,7 +505,10 @@
         const LOCAL_JOKES_FILE = 'jokes.json';
         // Fine-tuned Qwen2.5-0.5B, KV-cache export, 4-bit weights. The same
         // folder holds the tokenizer files, served locally alongside the model.
-        const MODEL_DIR = 'dad-joke-model/qwen';
+        // ?model=<folder> overrides the default, for A/B testing exports
+        // (e.g. ?model=qwen15). Folder names only; no slashes.
+        const MODEL_DIR = 'dad-joke-model/' +
+            ((new URLSearchParams(window.location.search).get('model') || 'qwen').replace(/[^A-Za-z0-9_-]/g, '') || 'qwen');
         const MODEL_PATH = './' + MODEL_DIR + '/model_q4.onnx';
         tfEnv.allowRemoteModels = false;
         tfEnv.localModelPath = './';
@@ -608,15 +611,49 @@
                 return w.replace(/(ing|ers|er|ies|es|s|ed|ly)$/, '');
             }
 
+            // Hashes of every training joke and training question, from
+            // known_jokes.json (scripts/build_known_jokes.py). Larger models
+            // memorise: the 1.5B reproduced "outstanding in his field"
+            // verbatim 3 times in 30 samples. Anything the model was trained
+            // on is rejected so AI mode only ever shows new material.
+            setKnown(known) {
+                this.knownJokes = new Set(known.jokes || []);
+                this.knownQuestions = new Set(known.questions || []);
+            }
+
+            // Must match norm() / fnv1a() in scripts/build_known_jokes.py.
+            normalizeJoke(s) {
+                return s.toLowerCase().replace(/\b[qa]:/g, ' ').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+            }
+
+            fnv1a(s) {
+                let h = 0x811c9dc5;
+                for (const b of new TextEncoder().encode(s)) {
+                    h ^= b;
+                    h = Math.imul(h, 0x01000193) >>> 0;
+                }
+                return h >>> 0;
+            }
+
+            isKnown(joke) {
+                if (!this.knownJokes) return false;
+                if (this.knownJokes.has(this.fnv1a(this.normalizeJoke(joke)))) return true;
+                const parts = this.split(joke);
+                const q = parts ? parts.q : joke.split('?')[0];
+                return this.knownQuestions.has(this.fnv1a(this.normalizeJoke(q)));
+            }
+
             validate(joke) {
                 const parts = this.split(joke);
                 const checks = {
                     hasFormat: parts !== null,
                     isShort: joke.length >= 20 && joke.length <= 200,
                     isClean: !this.containsProfanity(joke),
+                    isEnglish: !/[^\x00-\x7FÀ-ɏ‘-”…]/.test(joke),   // Qwen occasionally emits CJK
                     noMeta: !/(here's|I made|joke about|example)/i.test(joke),
                     notDegenerate: !this.isDegenerate(joke),
-                    notTautology: parts !== null && !this.isTautology(parts)
+                    notTautology: parts !== null && !this.isTautology(parts),
+                    isNew: !this.isKnown(joke)
                     // Wordplay is deliberately NOT a gate: most real puns play on a
                     // word associated with the setup (scarecrow -> field), which no
                     // surface check can see. It's used only to rank candidates.
@@ -923,6 +960,11 @@
                 progressBar.style.width = '20%';
                 progressBar.textContent = '20%';
                 aiTokenizer = await AutoTokenizer.from_pretrained(MODEL_DIR);
+                try {
+                    validator.setKnown(await (await fetch('./known_jokes.json')).json());
+                } catch (e) {
+                    console.warn('[AI] known_jokes.json not loaded; regurgitation filter off:', e.message);
+                }
                 // The tokenizer object doesn't expose eos_token_id for Qwen2;
                 // the model config does (151643 for Qwen2.5).
                 const modelConfig = await (await fetch('./' + MODEL_DIR + '/config.json')).json();

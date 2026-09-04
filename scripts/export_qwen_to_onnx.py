@@ -154,7 +154,11 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         print(f"\nExporting {MERGED_DIR} with Optimum (text-generation-with-past)...", flush=True)
-        main_export(MERGED_DIR, output=tmp, task="text-generation-with-past")
+        # no_post_process: Optimum's post-processing (tied-weight dedupe)
+        # serializes the whole fp32 graph into one protobuf and fails on
+        # models over 2 GB (Qwen2.5-1.5B is 5.8 GB). We handle the tied
+        # head ourselves in untie_lm_head, so the step isn't needed.
+        main_export(MERGED_DIR, output=tmp, task="text-generation-with-past", no_post_process=True)
         fp32 = os.path.join(tmp, "model.onnx")
         fp32_mb = sum(os.path.getsize(os.path.join(tmp, f)) for f in os.listdir(tmp) if f.startswith("model.onnx")) / 2**20
         print(f"  fp32 size: {fp32_mb:.0f} MB")
