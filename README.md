@@ -20,7 +20,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 - **🔀 Triple Joke Sources**
   - **🌐 Live API Mode**: Fetches jokes from [icanhazdadjoke.com](https://icanhazdadjoke.com) (1000+ jokes)
   - **📦 Local Vault Mode**: Curated collection of 750+ dad jokes stored locally
-  - **🤖 AI Generated Mode**: Qwen2.5-0.5B fine-tuned on 4,000+ dad jokes generates unique jokes on-device via ONNX Runtime Web (WebGPU, ~425MB one-time download)
+  - **🤖 AI Generated Mode**: Qwen2.5-1.5B fine-tuned on LLM-vetted dad jokes generates new jokes on-device via ONNX Runtime Web (WebGPU, ~1.1GB one-time download); anything from the training set is filtered out
   - User-selectable toggle between all three sources
   - Automatic fallback: If API or AI fails, seamlessly switches to local jokes
 
@@ -63,7 +63,7 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
 
 **Custom-trained AI model generates dad jokes directly in your browser**
 
-- **Model**: Qwen2.5-0.5B (494M parameters), LoRA fine-tuned on 3,700 curated and synthetic jokes — see [docs/MODEL_TRAINING.md](docs/MODEL_TRAINING.md) for the full history of what worked and what didn't
+- **Model**: Qwen2.5-1.5B, LoRA fine-tuned on 2,300 jokes that passed an LLM judge (curated + vetted synthetic) — see [docs/MODEL_TRAINING.md](docs/MODEL_TRAINING.md) for the full history of what worked and what didn't
 - **Technology**: ONNX Runtime Web (WebGPU, wasm fallback), KV-cache decoding, 4-bit weights
 - **Platform**: Any modern browser (desktop & mobile)
 - **Quality Control**: Multi-layer validation system ensures dad-joke quality
@@ -88,11 +88,11 @@ Dad's Workshop is a delightful web application that generates dad jokes on deman
   - Edge 113+ ✅
   - Safari 16+ ✅
   - Firefox 100+ ✅
-- **Mobile devices**: ⚠️ Works, but the ~425MB download and wasm fallback make it slow
+- **Mobile devices**: ❌ Not recommended (~1.1GB download; wasm fallback is very slow)
   - Use API or Local Vault mode on mobile instead
 
 **First-Time Setup:**
-- One-time model download (~425MB, cached)
+- One-time model download (~1.1GB, cached)
 - A few seconds to initialize
 - Subsequent page loads: instant (model cached in IndexedDB)
 
@@ -376,7 +376,7 @@ npx http-server
 - **External APIs**:
   - [icanhazdadjoke.com](https://icanhazdadjoke.com) - Free dad joke API
   - [ONNX Runtime Web CDN](https://cdn.jsdelivr.net/npm/onnxruntime-web) - ML inference runtime
-- **AI Model**: Qwen2.5-0.5B, LoRA fine-tuned, 4-bit weights + int8 embeddings, ~425MB ([training notes](docs/MODEL_TRAINING.md))
+- **AI Model**: Qwen2.5-1.5B, LoRA fine-tuned, 4-bit weights + int8 embeddings, ~1.1GB ([training notes](docs/MODEL_TRAINING.md))
 
 ### Why No Frameworks?
 

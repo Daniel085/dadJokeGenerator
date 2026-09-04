@@ -448,12 +448,12 @@
             <p>Generate brand-new dad jokes with a language model running entirely in your browser.</p>
             <p><strong>First-time setup:</strong></p>
             <ul>
-                <li>Qwen2.5-0.5B, fine-tuned on 4,000+ curated dad jokes</li>
-                <li>One-time download (<span id="aiModelSize">~425MB</span>, cached for future visits)</li>
-                <li>Works in any modern desktop browser; on mobile, expect a slow first load</li>
-                <li>Takes 10&ndash;30 seconds to initialize</li>
+                <li>Qwen2.5-1.5B, fine-tuned on 2,500+ curated dad jokes</li>
+                <li>One-time download (<span id="aiModelSize">~1.1GB</span>, cached for future visits)</li>
+                <li>Needs a desktop browser with WebGPU (Chrome, Edge, or recent Safari); not recommended on mobile</li>
+                <li>Takes 20&ndash;60 seconds to initialize</li>
             </ul>
-            <p>A few seconds per joke. The jokes are AI-written, so some will be groaners &mdash; that's the point.</p>
+            <p>A couple of seconds per joke. Every joke is newly written &mdash; anything from the training set is filtered out &mdash; so some will be groaners. That's the point.</p>
             <div>
                 <button class="ai-info-btn" onclick="initializeAI()">Initialize AI Mode</button>
                 <button class="ai-info-btn secondary" onclick="cancelAIInit()">Use Local Vault</button>
@@ -507,8 +507,9 @@
         // folder holds the tokenizer files, served locally alongside the model.
         // ?model=<folder> overrides the default, for A/B testing exports
         // (e.g. ?model=qwen15). Folder names only; no slashes.
+        const DEFAULT_MODEL = 'qwen15';   // Qwen2.5-1.5B, 1 epoch on judge-filtered data
         const MODEL_DIR = 'dad-joke-model/' +
-            ((new URLSearchParams(window.location.search).get('model') || 'qwen').replace(/[^A-Za-z0-9_-]/g, '') || 'qwen');
+            ((new URLSearchParams(window.location.search).get('model') || DEFAULT_MODEL).replace(/[^A-Za-z0-9_-]/g, '') || DEFAULT_MODEL);
         const MODEL_PATH = './' + MODEL_DIR + '/model_q4.onnx';
         tfEnv.allowRemoteModels = false;
         tfEnv.localModelPath = './';

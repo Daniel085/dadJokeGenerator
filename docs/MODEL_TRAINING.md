@@ -1,23 +1,23 @@
 # Model Training: What Worked, What Didn't, and Why
 
-This document records the three approaches tried for the in-browser AI joke
-model, why the first two fell short, and how to reproduce the current one.
+This document records the four approaches tried for the in-browser AI joke
+model, why the first three fell short, and how to reproduce the current one.
 
 ---
 
 ## TL;DR
 
-| | v1: From scratch | v2: DistilGPT-2 fine-tune | v3: Qwen2.5-0.5B LoRA (current) |
-|---|---|---|---|
-| Base | Random init, 8-layer transformer | Pretrained DistilGPT-2 | Pretrained Qwen2.5-0.5B |
-| Parameters | 51M | 82M | 494M |
-| Training data | 4,109 synthetic jokes | same | 3,676 (synthetic + 766 curated, deduped) |
-| Best val loss | 3.02 | 2.05 | 1.84 |
-| Training time (M4 Mac mini) | 38 min | 21 min | 28 min |
-| Browser download | 49 MB | 115 MB | 426 MB |
-| Browser latency per candidate | ~11 s | ~11 s | 1.5–3 s (WebGPU) |
-| Jokes that land (hand-scored) | ~5% | ~5% | **~30%** |
-| Nonsense | ~60% | ~60% | ~27% |
+| | v1: From scratch | v2: DistilGPT-2 | v3: Qwen2.5-0.5B LoRA | v4: Qwen2.5-1.5B LoRA (current) |
+|---|---|---|---|---|
+| Base | Random init, 8 layers | Pretrained DistilGPT-2 | Pretrained Qwen2.5-0.5B | Pretrained Qwen2.5-1.5B |
+| Parameters | 51M | 82M | 494M | 1.54B |
+| Training data | 4,109 synthetic | same | 3,676 (synthetic + curated) | 2,307 (LLM-judged synthetic + curated) |
+| Best val loss | 3.02 | 2.05 | 1.84 (v2 val set) | 1.62 (v3 val set) |
+| Training time (M4 Mac mini) | 38 min | 21 min | 28 min | 13 min (1 epoch) |
+| Browser download | 49 MB | 115 MB | 426 MB | 1.1 GB |
+| Browser latency per candidate | ~11 s | ~11 s | 0.5–1.5 s (Chrome, WebGPU) | 1–3 s (Chrome, WebGPU) |
+| Jokes that land (hand-scored) | ~5% | ~5% | ~30% | **~30-35%, none copied** |
+| Nonsense | ~60% | ~60% | ~25% | ~20% |
 
 **Lessons:**
 
@@ -27,7 +27,12 @@ model, why the first two fell short, and how to reproduce the current one.
    puns: it produces pun-*shaped* output ("za-stra performer") with no sound
    overlap.
 3. A 0.5B model fine-tuned on the same data is the first one where a
-   meaningful share of jokes actually work. The cost is a 4x larger download.
+   meaningful share of jokes actually work.
+4. Going to 1.5B is what moves coherence again. Cleaning the data with an
+   LLM judge did *not* help the 0.5B on its own (see the ablation in v4).
+   The bigger model memorises training jokes at 2 epochs (5 of 30 verbatim);
+   at 1 epoch it produced none in 30 with the same original-joke hit rate,
+   and the browser additionally filters anything from the training set.
 
 ---
 
@@ -95,7 +100,7 @@ Two experiments ruled out the obvious alternatives:
 
 ---
 
-## v3: The current model
+## v3: Qwen2.5-0.5B (superseded by v4, kept as the small option)
 
 ### Data (`scripts/prepare_data_v2.py`)
 
@@ -173,42 +178,123 @@ a 16 GB Mac. LoRA (r=16, alpha=32, all attention and MLP projections) trains
 
 ---
 
+## v4: The current model (Qwen2.5-1.5B on LLM-judged data)
+
+Two levers were pulled after v3, and only one of them turned out to matter.
+
+### Lever 1: LLM-judged training data (`scripts/judge_jokes.py`, `prepare_data_v3.py`)
+
+Every synthetic joke was scored 1-5 by Claude via the `claude` CLI in
+headless mode (`claude -p`, no API key), 40 jokes per call, 8 calls in
+parallel, ~20 minutes for 4,503 unique jokes:
+
+| Score | Meaning | Count |
+|---|---|---|
+| 5 | real pun that clearly works | 369 |
+| 4 | real pun, weak or well-worn | 2,402 |
+| 3 | joke-shaped, wordplay is a stretch | 1,130 |
+| 2 | grammatical, no actual joke | 567 |
+| 1 | nonsense / broken | 35 |
+
+Keeping 4 and above, plus all 766 curated human jokes, deduping and capping
+the "Why did the" opener at 30% gives **2,307 train / 256 validation**.
+Spot checks agree with the judge: dropped examples look like "What do you
+call a happy hospital bed? A resting place of joy!"; 5s look like "What do
+you call a furnace that loves music? A heavy metal fan!".
+
+### Lever 2: Qwen2.5-1.5B
+
+LoRA r=16 on all projections (18.5M trainable, 1.2%), batch 4, LR 2e-4.
+A dry run showed 6 GB allocated / 10.6 GB driver memory on MPS, so it fits
+on a 16 GB Mac. Val loss: epoch 1 **1.6238**, epoch 2 1.6216, then 1.77 and
+1.98 (overfitting). One epoch is the sweet spot: identical validation loss
+to epoch 2 with a much higher train loss, i.e. much less memorisation.
+
+### Ablation: which lever mattered?
+
+Same 30-sample hand-scoring, same sampling seed, all three from the
+quantized ONNX exports:
+
+| Model | Data | Land | Nonsense | Verbatim training copies |
+|---|---|---|---|---|
+| 0.5B | v2 | ~33% | ~23% | 0 |
+| 0.5B | v3 (judged) | ~25% | ~35% | 1 |
+| 1.5B | v3 (judged), 2 epochs | ~43% | ~17% | **5** |
+| **1.5B, 1 epoch (shipped)** | v3 (judged) | ~30-35% | ~20% | **0** |
+
+The judged data did nothing for the 0.5B (if anything it hurt, likely
+because the set is 40% smaller). The 1.5B is clearly more coherent, and its
+hits are better ("Why did the sailor love music? It was full of sea-sharps
+and sea-flats!", "What do you call a sleeping bag at the airport? A terminal
+nap sack!"). But it recited training jokes: "outstanding in his field" three
+times in 30, plus "dino-snore" and "night-stand". It also emitted a Chinese
+character once.
+
+### The regurgitation filter (`scripts/build_known_jokes.py`, `known_jokes.json`)
+
+Because the bigger model memorises, the browser now loads a 100 KB set of
+FNV-1a hashes of every training joke and every training *question* and
+rejects any candidate that matches either. Normalisation and hash are
+implemented identically in Python and JS (parity verified). Combined with a
+non-English check, AI mode can only show material that is not in the
+training set. In practice the best-of-2 loop absorbs the rejections.
+
+### Export notes specific to 1.5B
+
+- Optimum's post-processing (tied-weight dedupe) serialises the fp32 graph
+  into one protobuf and fails above 2 GB; `no_post_process=True` skips it.
+  The head then arrives as its own initializer and MatMulNBits quantizes it
+  directly.
+- Result: 4-bit MatMuls + int8 embedding (890 MB -> 223 MB) = **1,145 MB**.
+- The KV cache is 28 layers x 2 heads x head_dim 128; the page reads those
+  from `config.json` rather than assuming the 0.5B's shape.
+
+---
+
 ## Reproducing the current model
 
-All commands run from the repo root with the project venv active.
+All commands run from the repo root with the project venv active. The
+`claude` CLI must be installed and logged in for the judging step.
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r scripts/requirements.txt
 
-python scripts/prepare_data_v2.py        # ~1 s
-python scripts/finetune_qwen.py          # ~30 min on Apple Silicon
-python scripts/export_qwen_to_onnx.py    # ~5 min; writes dad-joke-model/qwen/
-python -m http.server 8765               # then open http://localhost:8765
+python scripts/prepare_data_v2.py                       # base pool
+python scripts/judge_jokes.py --workers 8               # ~20 min, resumable
+python scripts/prepare_data_v3.py --min-score 4
+python scripts/finetune_qwen.py --base Qwen/Qwen2.5-1.5B --data v3 --name qwen15 --batch 4 --epochs 1   # ~15 min
+python scripts/export_qwen_to_onnx.py dad-joke-model/qwen15_finetuned_hf dad-joke-model/qwen15         # ~10 min
+python scripts/build_known_jokes.py                     # known_jokes.json (committed)
+python -m http.server 8765                              # then open http://localhost:8765
 ```
 
 `dad-joke-model/` is gitignored; the exported folder must be produced (or
 copied) wherever the site is served from. Add `?debug=true` to the URL to
-see per-attempt timing, validator decisions and candidates in the console.
+see per-attempt timing, validator decisions and candidates in the console,
+and `?model=<folder>` to load a different export (e.g. `?model=qwen` for
+the 0.5B).
 
 ---
 
 ## Known limitations and next steps
 
-- **Download size.** 426 MB is a lot for a joke site. The int8 embedding and
-  the 4-bit head are already in; the remaining lever is vocabulary pruning
-  (the model only ever needs to *emit* English tokens, so the 152k table
-  could be cut to ~20-30k rows, saving ~150 MB) or a smaller base such as
-  SmolLM2-360M.
-- **Per-token speed.** ~120 ms/token on WebGPU is slower than the hardware
-  should allow; an fp16 graph or Transformers.js v3's generation pipeline
-  would likely help.
-- **Quality ceiling.** A third landing is a good outcome for 0.5B. The next
-  real step up is a 1.5B model, which is ~1 GB in the browser, i.e. the
-  WebLLM-scale download this project moved away from.
-- **Data.** The synthetic set still contains weak puns. An LLM-judged filter
-  keeping only jokes whose pun is phonetically real would likely help more
-  than any hyperparameter.
+- **Download size.** 1.1 GB is the WebLLM-scale download this project once
+  moved away from. Vocabulary pruning (the model only needs to *emit*
+  English tokens) could cut ~200 MB; a smaller vocabulary model would cut
+  more. The 0.5B export (426 MB) remains available via `?model=qwen`.
+- **Memorisation.** Even at one epoch the 1.5B leans on well-known jokes.
+  The hash filter blocks exact copies and reused setups, not near-copies
+  ("Why did the music teacher get promoted? She was outstanding in her
+  field!"). A fuzzy filter (e.g. shared 4-gram ratio against the training
+  set) would catch those.
+- **Judged data didn't help the small model.** Either the filtered set is
+  too small, or the judge's threshold removes stylistic variety. Worth
+  re-testing with score >= 3 or with more synthetic data generated to
+  replace what was dropped.
+- **Per-token speed.** In the in-app preview pane the 1.5B takes 1.7-5 s per
+  candidate; in Chrome proper it's roughly 3x faster. An fp16 graph would
+  likely help further.
 
 ---
 
@@ -217,8 +303,11 @@ see per-attempt timing, validator decisions and candidates in the console.
 | File | Purpose |
 |---|---|
 | `scripts/prepare_data_v2.py` | Build the v2 dataset (curated + synthetic, deduped, balanced) |
-| `scripts/finetune_qwen.py` | LoRA fine-tune Qwen2.5-0.5B (current) |
+| `scripts/judge_jokes.py` | Score synthetic jokes 1-5 with the claude CLI (headless, resumable) |
+| `scripts/prepare_data_v3.py` | v2 pipeline with judge filtering (current data) |
+| `scripts/finetune_qwen.py` | LoRA fine-tune any Qwen2.5 base (`--base/--data/--name`) (current) |
 | `scripts/export_qwen_to_onnx.py` | KV-cache export, untie head, 4-bit + int8, tokenizer fix (current) |
+| `scripts/build_known_jokes.py` | Hash set of training jokes/questions for the browser filter |
 | `scripts/finetune_gpt2.py` | v2 DistilGPT-2 fine-tune (kept for reference) |
 | `scripts/export_finetuned_to_onnx.py` | v2 export (kept for reference) |
 | `scripts/model.py`, `scripts/train_from_scratch.py`, `scripts/export_to_onnx.py` | v1 from-scratch model (kept for reference) |
