@@ -12,10 +12,12 @@ Export the fine-tuned Qwen2.5-0.5B joke model to ONNX for the browser.
 
 Usage:
     python scripts/finetune_qwen.py          # first
-    python scripts/export_qwen_to_onnx.py [merged_model_dir]
+    python scripts/export_qwen_to_onnx.py [merged_model_dir] [output_dir]
+
+    defaults: dad-joke-model/qwen_finetuned_hf -> dad-joke-model/qwen
 
 Output:
-    dad-joke-model/qwen/model_q4.onnx        (+ tokenizer.json etc.)
+    <output_dir>/model_q4.onnx               (+ tokenizer.json etc.)
 """
 
 import os
@@ -30,7 +32,7 @@ from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
 from optimum.exporters.onnx import main_export
 
 MERGED_DIR = sys.argv[1] if len(sys.argv) > 1 else "dad-joke-model/qwen_finetuned_hf"
-OUT_DIR = "dad-joke-model/qwen"
+OUT_DIR = sys.argv[2] if len(sys.argv) > 2 else "dad-joke-model/qwen"
 OUT_MODEL = os.path.join(OUT_DIR, "model_q4.onnx")
 TOKENIZER_FILES = ["tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt",
                    "special_tokens_map.json", "config.json", "generation_config.json"]
